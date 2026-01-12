@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import Navbar from "@/components/layout/navbar";
+import { Providers } from "./providers";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -25,10 +26,12 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <Navbar />
-          <main className="min-h-screen bg-background text-foreground">
-            {children}
-          </main>
+          <Providers>
+            <Navbar />
+            <main className="min-h-screen bg-background text-foreground">
+              {children}
+            </main>
+          </Providers>
         </ThemeProvider>
       </body>
     </html>

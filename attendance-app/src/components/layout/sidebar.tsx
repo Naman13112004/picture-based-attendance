@@ -1,7 +1,8 @@
+// components/layout/sidebar.tsx
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation"; // Added useRouter
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { 
@@ -18,6 +19,17 @@ interface SidebarProps {
 
 export function Sidebar({ role }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter(); // Initialize router
+
+  // Logout Handler
+  const handleLogout = () => {
+    // 1. Remove tokens from LocalStorage
+    localStorage.removeItem("token");
+    localStorage.removeItem("user"); 
+    
+    // 2. Redirect to Home Page
+    router.push("/");
+  };
 
   // Define routes based on role
   const routes = role === "teacher" 
@@ -53,12 +65,15 @@ export function Sidebar({ role }: SidebarProps) {
         ))}
       </div>
       <div className="p-4 border-t">
-        <Link href="/">
-          <Button variant="outline" className="w-full gap-2 text-destructive hover:text-destructive cursor-pointer">
+        {/* Changed from Link to Button with onClick */}
+        <Button 
+            variant="outline" 
+            className="w-full gap-2 text-destructive hover:text-destructive cursor-pointer"
+            onClick={handleLogout}
+        >
             <LogOut className="h-4 w-4" />
             Sign Out
-          </Button>
-        </Link>
+        </Button>
       </div>
     </div>
   );

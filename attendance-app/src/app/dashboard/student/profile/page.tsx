@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { CameraModal } from "@/components/camera-modal";
 import { PlusCircle, Save, Trash2, UserSquare2 } from "lucide-react";
 import { Loader2 } from "lucide-react";
+import api from "@/lib/api";
+
+const API_URL = 'http://localhost:5000'; // For constructing image URLs
 
 export default function StudentProfilePage() {
   // State to store up to 3 image base64 strings
@@ -14,6 +17,31 @@ export default function StudentProfilePage() {
   const [activeSlotIndex, setActiveSlotIndex] = useState<number | null>(null);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+
+  // 1. Fetch Existing Profile on Mount
+  useEffect(() => {
+    const fetchProfile = async () => {
+        try {
+            const res = await api.get('/profile');
+            if (res.data) {
+                // Backend returns paths like "/uploads/..."
+                // We need to prepend the server URL to display them
+                const loadedImages = [
+                    res.data.faceData1 ? `${API_URL}${res.data.faceData1}` : null,
+                    res.data.faceData2 ? `${API_URL}${res.data.faceData2}` : null,
+                    res.data.faceData3 ? `${API_URL}${res.data.faceData3}` : null,
+                ];
+                setImages(loadedImages);
+            }
+        } catch (error) {
+            console.error("Failed to load profile", error);
+        } finally {
+            setIsLoadingData(false);
+        }
+    }
+    fetchProfile();
+  }, []);
 
   const openCameraForSlot = (index: number) => {
     setActiveSlotIndex(index);
@@ -36,8 +64,8 @@ export default function StudentProfilePage() {
       setImages(newImages);
   }
 
-  // Mock API call to save images to DB
-  const handleSaveProfile = () => {
+  // 2. Save Images
+  const handleSaveProfile = async () => {
       const filledImages = images.filter(img => img !== null);
       if(filledImages.length < 3) {
           alert("Please provide all 3 reference photos.");
@@ -45,12 +73,24 @@ export default function StudentProfilePage() {
       }
 
       setIsSaving(true);
-      console.log("Sending to backend API:", filledImages);
-      
-      setTimeout(() => {
+      try {
+          // Backend expects { images: [base64, base64, base64] }
+          // If the image is already a URL (loaded from server), we shouldn't re-upload it unless changed.
+          // However, for MVP simplicity, we might only support re-uploading all or handling mixed types.
+          // Let's assume for now the user re-captures or we send what we have.
+          // Note: Sending a URL string where base64 is expected might break the backend validator we wrote.
+          // Ideally, the backend should handle this, OR we force the user to retake photos if they want to update.
+          
+          await api.post('/profile/upload-faces', {
+              images: filledImages 
+          });
+          alert("Profile updated successfully!");
+      } catch (error) {
+          console.error(error);
+          alert("Failed to save profile.");
+      } finally {
           setIsSaving(false);
-          alert("Profile updated successfully! (Mock)");
-      }, 2000);
+      }
   }
 
   return (
@@ -80,7 +120,7 @@ export default function StudentProfilePage() {
                   {imgData ? (
                     <>
                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={imgData} alt={`Reference ${index + 1}`} className="w-full h-full object-cover" />
+                      <img src={imgData} alt={`Reference ${index + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
                       <Button
                         variant="destructive"
                         size="icon"

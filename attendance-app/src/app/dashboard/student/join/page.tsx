@@ -1,6 +1,7 @@
 // app/dashboard/student/join/page.tsx
 "use client";
 
+import api from "@/lib/api";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,24 +11,19 @@ import { Search, Users, Loader2 } from "lucide-react";
 export default function JoinClassPage() {
   const [code, setCode] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [foundClass, setFoundClass] = useState<string | null>(null);
 
-  const handleSearch = () => {
+  const handleJoin = async () => {
     setIsLoading(true);
-    // Mock API search
-    setTimeout(() => {
+    try {
+        const res = await api.post('/classrooms/join', { code });
+        alert(res.data.message); // "Successfully joined Class Name"
+        setCode("");
+    } catch (error: any) {
+        alert(error.response?.data?.message || "Failed to join class");
+    } finally {
         setIsLoading(false);
-        if (code.length > 3) {
-            setFoundClass("CS 101 - Intro to Programming (Prof. Smith)");
-        }
-    }, 1000);
+    }
   };
-
-  const handleJoin = () => {
-      alert(`Successfully joined ${foundClass}`);
-      setFoundClass(null);
-      setCode("");
-  }
 
   return (
     <div className="max-w-xl mx-auto space-y-8">
@@ -50,27 +46,11 @@ export default function JoinClassPage() {
                 value={code} 
                 onChange={(e) => setCode(e.target.value)}
             />
-            <Button onClick={handleSearch} disabled={isLoading || !code} className="cursor-pointer">
-               {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            <Button onClick={handleJoin} disabled={isLoading || !code} className="cursor-pointer">
+               {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Join Class"}
             </Button>
           </div>
-
-          {/* Result Preview */}
-          {foundClass && (
-             <div className="flex items-center p-4 border rounded-lg bg-secondary/50 animate-in fade-in slide-in-from-top-2">
-                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center mr-4">
-                    <Users className="h-5 w-5 text-primary" />
-                </div>
-                <div className="flex-1">
-                    <p className="font-medium">{foundClass}</p>
-                    <p className="text-xs text-muted-foreground">45 Students • 09:00 AM</p>
-                </div>
-             </div>
-          )}
         </CardContent>
-        <CardFooter className="flex justify-end">
-          <Button disabled={!foundClass} onClick={handleJoin} className="cursor-pointer">Join Class</Button>
-        </CardFooter>
       </Card>
     </div>
   );

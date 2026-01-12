@@ -7,20 +7,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { UploadCloud, Users, CheckCircle2, Loader2, AlertCircle } from "lucide-react";
-
-// Mock data based on ID
-const getClassDetails = (id: string) => {
-    return {
-        id: id,
-        name: id === '1' ? "CS 101 - Intro to Programming" : "Advanced Algorithms",
-        totalStudents: 45
-    }
-}
+import api from "@/lib/api";
 
 export default function ClassDetailsPage() {
   const params = useParams();
   const classId = params.id as string;
-  const classDetails = getClassDetails(classId);
 
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -41,34 +32,48 @@ export default function ClassDetailsPage() {
     }
   };
 
-  // Mock the entire backend process
-  const handleProcessAttendance = () => {
-      if(!file) return;
-
+  const handleProcessAttendance = async () => {
+      if(!file || !previewUrl) return;
       setStatus('uploading');
-      
-      // 1. Simulate Upload to server
-      setTimeout(() => {
-          setStatus('processing');
+
+      try {
+          // 1. Convert File to Base64 to send to our Node Backend
+          // (Alternatively, use FormData for multipart/form-data, but our Backend Controller expects JSON with base64 for now)
+          const reader = new FileReader();
+          reader.readAsDataURL(file);
           
-          // 2. Simulate Python AI processing (longer delay)
-          setTimeout(() => {
-              // Mock results coming back from Python API
-              const mockPresentCount = Math.floor(Math.random() * classDetails.totalStudents);
+          reader.onloadend = async () => {
+              const base64String = reader.result as string;
+              
+              setStatus('processing');
+              
+              // 2. Call API
+              const res = await api.post('/attendance/mark', {
+                  classId: classId,
+                  image: base64String
+              });
+
+              // 3. Handle Results
+              const { results } = res.data; // results: { total_faces_detected, present_student_ids, absent_count }
+              
               setAttendanceResults({
-                  present: mockPresentCount,
-                  absent: classDetails.totalStudents - mockPresentCount
+                  present: results.present_student_ids.length,
+                  absent: results.absent_count
               });
               setStatus('complete');
-          }, 3000); // 3 second processing simulation
+          };
 
-      }, 1500); // 1.5 second upload simulation
+      } catch (error) {
+          console.error(error);
+          setStatus('error');
+          alert("Failed to process attendance");
+      }
   }
 
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
+      {/* <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">{classDetails.name}</h2>
           <div className="flex items-center text-muted-foreground mt-2">
@@ -76,7 +81,7 @@ export default function ClassDetailsPage() {
             <span>{classDetails.totalStudents} Students Enrolled</span>
           </div>
         </div>
-      </div>
+      </div> */}
 
       <div className="grid gap-6 md:grid-cols-2">
         {/* Upload Section */}
@@ -125,7 +130,7 @@ export default function ClassDetailsPage() {
                     disabled={!file || status !== 'idle'}
                     onClick={handleProcessAttendance}
                 >
-                    {status === 'idle' ? "Process Attendance" : "Processing..."}
+                    {status === 'idle' ? "Process Attendance" : status === 'complete' ? "Attendance Taken" : "Processing..."}
                 </Button>
             </CardContent>
         </Card>

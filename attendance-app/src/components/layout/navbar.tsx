@@ -2,25 +2,50 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation"; // Added to check current route
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
-import { Moon, Sun, Menu, Camera } from "lucide-react";
+import { Moon, Sun, Menu, Camera, LayoutDashboard } from "lucide-react";
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export default function Navbar() {
   const { theme, setTheme } = useTheme();
+  const pathname = usePathname(); // Get current path
+  
   const [mounted, setMounted] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
 
-  // Prevent hydration mismatch for themes
   useEffect(() => {
     setMounted(true);
+    
+    // Check if user is logged in via localStorage
+    const token = localStorage.getItem("token");
+    const userStr = localStorage.getItem("user");
+    
+    if (token && userStr) {
+        try {
+            const user = JSON.parse(userStr);
+            setUserRole(user.role); // "STUDENT" or "TEACHER"
+        } catch (e) {
+            console.error("Failed to parse user data", e);
+        }
+    }
   }, []);
 
   const toggleTheme = () => {
     setTheme(theme === "dark" ? "light" : "dark");
   };
+
+  // Helper to determine where the main button should go
+  const getDashboardLink = () => {
+      if (userRole === "TEACHER") return "/dashboard/teacher";
+      return "/dashboard/student"; // Default to student
+  };
+
+  // Condition to hide button: if we are already inside /dashboard
+  const isDashboard = pathname?.startsWith("/dashboard");
 
   if (!mounted) return null;
 
@@ -42,9 +67,24 @@ export default function Navbar() {
             <Button variant="ghost" size="icon" onClick={toggleTheme} className="cursor-pointer">
               {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
             </Button>
-            <Link href="/register">
-                <Button className="cursor-pointer">Get Started</Button>
-            </Link>
+            
+            {/* Logic for Main CTA Button */}
+            {!isDashboard && (
+                <>
+                    {userRole ? (
+                        <Link href={getDashboardLink()}>
+                             <Button className="cursor-pointer gap-2">
+                                <LayoutDashboard className="h-4 w-4" /> 
+                                Dashboard
+                             </Button>
+                        </Link>
+                    ) : (
+                        <Link href="/register">
+                            <Button className="cursor-pointer">Get Started</Button>
+                        </Link>
+                    )}
+                </>
+            )}
           </div>
         </div>
 
@@ -69,10 +109,23 @@ export default function Navbar() {
             className="md:hidden border-b bg-background"
           >
             <div className="container py-4 flex flex-col space-y-4 px-4">
-              <Link href="/about" className="text-sm font-medium">How it Works</Link>
-              <Link href="/login">
-                  <Button className="w-full">Get Started</Button>
+              <Link href="/about" className="text-sm font-medium" onClick={() => setIsMobileMenuOpen(false)}>
+                How it Works
               </Link>
+              
+              {!isDashboard && (
+                  userRole ? (
+                    <Link href={getDashboardLink()} onClick={() => setIsMobileMenuOpen(false)}>
+                        <Button className="w-full gap-2">
+                            <LayoutDashboard className="h-4 w-4" /> Dashboard
+                        </Button>
+                    </Link>
+                  ) : (
+                    <Link href="/register" onClick={() => setIsMobileMenuOpen(false)}>
+                        <Button className="w-full">Get Started</Button>
+                    </Link>
+                  )
+              )}
             </div>
           </motion.div>
         )}
