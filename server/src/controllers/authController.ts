@@ -3,6 +3,7 @@ import db from '../config/db.js';
 import bcrypt from 'bcrypt';
 import { generateToken } from '../utils/jwt.js';
 import { OAuth2Client } from 'google-auth-library';
+import axios from 'axios';
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -54,48 +55,55 @@ export const login = async (req: Request, res: Response) => {
     res.json({ token, user: { id: user.id, name: user.name, role: user.role } });
 
   } catch (error) {
+    console.log(error);
     res.status(500).json({ message: 'Server error' });
   }
 };
 
 export const googleLogin = async (req: Request, res: Response) => {
     try {
-        const { token } = req.body; // Token from frontend Google Button
-        const ticket = await client.verifyIdToken({
-            idToken: token,
-            audience: process.env.GOOGLE_CLIENT_ID!
-        });
-        
-        const payload = ticket.getPayload();
-        if(!payload || !payload.email) return res.status(400).json({message: "Invalid Google Token"});
+        const { token, role } = req.body; // 'token' here is the Access Token
 
-        let user = await db.user.findUnique({ where: { email: payload.email }});
+        // 1. Verify Token & Get User Info from Google
+        const googleRes = await axios.get(`https://www.googleapis.com/oauth2/v3/userinfo`, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+
+        const { email, name, picture, sub } = googleRes.data;
+
+        if (!email) return res.status(400).json({ message: "Google account has no email" });
+
+        // 2. Find or Create User
+        let user = await db.user.findUnique({ where: { email } });
 
         if (!user) {
-            // Register new user via Google
-            // Note: In a real app, you might want to ask for Role if it's a new Google user. 
-            // For MVP, we might default to STUDENT or error out. 
-            // Let's assume we pass a 'role' from frontend along with token for new users
-            const role = req.body.role || "STUDENT"; 
+            // Create new user
+            // Use the role passed from frontend, or default to STUDENT
+            const userRole = role === "TEACHER" ? "TEACHER" : "STUDENT";
 
             user = await db.user.create({
                 data: {
-                    email: payload.email,
-                    name: payload.name || "User",
-                    role: role,
-                    avatar: payload.picture ?? null,
-                    ...(role === "STUDENT" && {
-                        studentProfiles: { create: {} },
-                    })
+                    email,
+                    name,
+                    role: userRole,
+                    avatar: picture,
+                    ...(userRole === "STUDENT" && {
+                      studentProfiles: { create: {} },
+                    }),
                 }
             });
         }
 
-        const jwtToken = generateToken(user.id, user.role);
-        res.json({ token: jwtToken, user: { id: user.id, name: user.name, role: user.role } });
+        // 3. Generate our App's JWT
+        const appToken = generateToken(user.id, user.role);
+
+        res.json({ 
+            token: appToken, 
+            user: { id: user.id, name: user.name, role: user.role, avatar: user.avatar } 
+        });
 
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Google Auth Failed"});
+        console.error("Google Auth Error:", error);
+        res.status(500).json({ message: "Google Authentication failed" });
     }
 }

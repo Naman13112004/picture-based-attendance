@@ -1,5 +1,9 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export const saveBase64Image = (base64String: string, folder: string, filename: string) => {
   // Remove header (e.g., "data:image/jpeg;base64,")
@@ -16,7 +20,7 @@ export const saveBase64Image = (base64String: string, folder: string, filename: 
   }
 
   const imageBuffer = Buffer.from(base64Data, 'base64');
-  const uploadDir = path.join(__dirname, '../../uploads', folder);
+  const uploadDir = path.join(__dirname, '../../../uploads', folder);
 
   // Ensure directory exists
   if (!fs.existsSync(uploadDir)){

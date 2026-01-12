@@ -1,15 +1,55 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String          @id @default(uuid())
+  email           String          @unique
+  password        String?
+  name            String
+  role            Role
+  avatar          String?
+  createdAt       DateTime        @default(now())
+  attendances     Attendance[]
+  taughtClasses   Classroom[]     @relation("TeacherClasses")
+  studentProfiles StudentProfile?
+}
+
+model Classroom {
+  id          String           @id @default(uuid())
+  name        String
+  code        String           @unique
+  schedule    String?
+  teacherId   String
+  createdAt   DateTime         @default(now())
+  attendances Attendance[]
+  teacher     User             @relation("TeacherClasses", fields: [teacherId], references: [id])
+  students    StudentProfile[] @relation("ClassroomToStudentProfile")
+}
+
+model StudentProfile {
+  id         String      @id @default(uuid())
+  userId     String      @unique
+  faceData1  String?
+  faceData2  String?
+  faceData3  String?
+  user       User        @relation(fields: [userId], references: [id])
+  classrooms Classroom[] @relation("ClassroomToStudentProfile")
+}
+
+model Attendance {
+  id        String    @id @default(uuid())
+  date      DateTime  @default(now())
+  status    Status
+  studentId String
+  classId   String
+  classroom Classroom @relation(fields: [classId], references: [id])
+  student   User      @relation(fields: [studentId], references: [id])
 }
 
 enum Role {
@@ -20,57 +60,4 @@ enum Role {
 enum Status {
   PRESENT
   ABSENT
-}
-
-model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String?  // Optional because Google Auth users won't have a password
-  name      String
-  role      Role
-  avatar    String?
-  createdAt DateTime @default(now())
-
-  // Relations
-  taughtClasses    Classroom[] @relation("TeacherClasses")
-  studentProfiles  StudentProfile? 
-  attendances      Attendance[]
-}
-
-model Classroom {
-  id          String   @id @default(uuid())
-  name        String
-  code        String   @unique // The 6-digit code to join
-  schedule    String?
-  teacherId   String
-  createdAt   DateTime @default(now())
-  
-  teacher     User     @relation("TeacherClasses", fields: [teacherId], references: [id])
-  students    StudentProfile[] // Students enrolled
-  attendances Attendance[]
-}
-
-model StudentProfile {
-  id          String   @id @default(uuid())
-  userId      String   @unique
-  
-  // We store 3 reference image URLs/Paths here
-  faceData1   String?  
-  faceData2   String?
-  faceData3   String?
-
-  user        User     @relation(fields: [userId], references: [id])
-  classrooms  Classroom[] 
-}
-
-model Attendance {
-  id          String   @id @default(uuid())
-  date        DateTime @default(now())
-  status      Status   // "PRESENT" or "ABSENT"
-  
-  studentId   String
-  classId     String
-
-  student     User      @relation(fields: [studentId], references: [id])
-  classroom   Classroom @relation(fields: [classId], references: [id])
 }
