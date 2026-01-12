@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+face_recognition
+numpy
+opencv-python-headless
+python-multipart
+requests
+pydantic
