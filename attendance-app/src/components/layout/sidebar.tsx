@@ -10,8 +10,13 @@ import {
   Users, 
   Settings, 
   LogOut, 
-  BookOpen
+  BookOpen,
+  ChevronLeft,
+  Menu
 } from "lucide-react";
+
+import { useAuth } from "@/store/useAuth";
+import { useState } from "react";
 
 interface SidebarProps {
   role: "teacher" | "student";
@@ -21,13 +26,13 @@ export function Sidebar({ role }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter(); // Initialize router
 
-  // Logout Handler
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const { clearAuth } = useAuth();
+
   const handleLogout = () => {
-    // 1. Remove tokens from LocalStorage
-    localStorage.removeItem("token");
-    localStorage.removeItem("user"); 
-    
-    // 2. Redirect to Home Page
+    clearAuth();
     router.push("/");
   };
 
@@ -45,36 +50,81 @@ export function Sidebar({ role }: SidebarProps) {
       ];
 
   return (
-    <div className="flex h-full flex-col border-r bg-card w-64 md:flex">
-      <div className="p-6">
-        <h2 className="text-2xl font-bold tracking-tight text-primary">
-          {role === "teacher" ? "Teacher Panel" : "Student View"}
-        </h2>
-      </div>
-      <div className="flex-1 px-4 space-y-2">
-        {routes.map((route) => (
-          <Link key={route.href} href={route.href}>
-            <Button
-              variant={pathname === route.href ? "secondary" : "ghost"}
-              className={cn("w-full justify-start gap-2 cursor-pointer", pathname === route.href && "bg-secondary")}
-            >
-              <route.icon className="h-4 w-4" />
-              {route.label}
-            </Button>
-          </Link>
-        ))}
-      </div>
-      <div className="p-4 border-t">
-        {/* Changed from Link to Button with onClick */}
-        <Button 
-            variant="outline" 
-            className="w-full gap-2 text-destructive hover:text-destructive cursor-pointer"
+    <>
+      {/* Mobile Toggle */}
+      <Button
+        variant="outline"
+        size="icon"
+        className="md:hidden fixed bottom-5 left-4 bg-black"
+        onClick={() => setMobileOpen(true)}
+      >
+        <Menu />
+      </Button>
+
+      {/* Overlay */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/40 z-40 md:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside
+        className={cn(
+          "fixed md:static z-50 h-full bg-card border-r transition-all",
+          collapsed ? "w-16" : "w-64",
+          mobileOpen ? "left-0" : "-left-full",
+          "md:left-0"
+        )}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-4">
+          {!collapsed && (
+            <h2 className="font-bold text-primary">
+              {role === "teacher" ? "Teacher Panel" : "Student View"}
+            </h2>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setCollapsed(!collapsed)}
+            className="hidden md:flex cursor-pointer"
+          >
+            <ChevronLeft className={cn("transition", collapsed && "rotate-180")} />
+          </Button>
+        </div>
+
+        {/* Routes */}
+        <div className="px-2 space-y-1">
+          {routes.map((route) => (
+            <Link key={route.href} href={route.href}>
+              <Button
+                variant={pathname === route.href ? "secondary" : "ghost"}
+                className={cn(
+                  "w-full justify-start gap-2 cursor-pointer",
+                  collapsed && "justify-center"
+                )}
+              >
+                <route.icon className="h-4 w-4" />
+                {!collapsed && route.label}
+              </Button>
+            </Link>
+          ))}
+        </div>
+
+        {/* Logout */}
+        <div className="p-4 border-t">
+          <Button
+            variant="outline"
+            className="w-full gap-2 text-destructive cursor-pointer"
             onClick={handleLogout}
-        >
+          >
             <LogOut className="h-4 w-4" />
-            Sign Out
-        </Button>
-      </div>
-    </div>
+            {!collapsed && "Sign Out"}
+          </Button>
+        </div>
+      </aside>
+    </>
   );
 }

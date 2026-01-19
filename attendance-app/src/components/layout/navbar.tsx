@@ -8,46 +8,36 @@ import { Button } from "@/components/ui/button";
 import { Moon, Sun, Menu, Camera, LayoutDashboard } from "lucide-react";
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "@/store/useAuth";
 
 export default function Navbar() {
   const { theme, setTheme } = useTheme();
   const pathname = usePathname(); // Get current path
   
-  const [mounted, setMounted] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [userRole, setUserRole] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-    
-    // Check if user is logged in via localStorage
-    const token = localStorage.getItem("token");
-    const userStr = localStorage.getItem("user");
-    
-    if (token && userStr) {
-        try {
-            const user = JSON.parse(userStr);
-            setUserRole(user.role); // "STUDENT" or "TEACHER"
-        } catch (e) {
-            console.error("Failed to parse user data", e);
-        }
-    }
-  }, []);
+  const { token, role } = useAuth();
+  const isLoggedIn = !!token;
 
   const toggleTheme = () => {
     setTheme(theme === "dark" ? "light" : "dark");
   };
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Helper to determine where the main button should go
   const getDashboardLink = () => {
-      if (userRole === "TEACHER") return "/dashboard/teacher";
+      if (role === "TEACHER") return "/dashboard/teacher";
       return "/dashboard/student"; // Default to student
   };
 
   // Condition to hide button: if we are already inside /dashboard
   const isDashboard = pathname?.startsWith("/dashboard");
 
-  if (!mounted) return null;
+  if(!mounted) return null;
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
@@ -71,7 +61,7 @@ export default function Navbar() {
             {/* Logic for Main CTA Button */}
             {!isDashboard && (
                 <>
-                    {userRole ? (
+                    {isLoggedIn ? (
                         <Link href={getDashboardLink()}>
                              <Button className="cursor-pointer gap-2">
                                 <LayoutDashboard className="h-4 w-4" /> 
@@ -114,7 +104,7 @@ export default function Navbar() {
               </Link>
               
               {!isDashboard && (
-                  userRole ? (
+                  isLoggedIn ? (
                     <Link href={getDashboardLink()} onClick={() => setIsMobileMenuOpen(false)}>
                         <Button className="w-full gap-2">
                             <LayoutDashboard className="h-4 w-4" /> Dashboard

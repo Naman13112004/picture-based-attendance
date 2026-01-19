@@ -27,7 +27,7 @@ app.use(express.urlencoded({ limit: "50mb", extended: true })); // Increase urle
 app.use(morgan('dev')); // Logger
 
 // Serve Static Files (Uploaded Images)
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
 
 // Health Check
 app.get('/', (req, res) => {

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { CameraModal } from "@/components/camera-modal";
+import { CameraModal } from "@/components/modals/camera-modal";
 import { PlusCircle, Save, Trash2, UserSquare2 } from "lucide-react";
 import { Loader2 } from "lucide-react";
 import api from "@/lib/api";

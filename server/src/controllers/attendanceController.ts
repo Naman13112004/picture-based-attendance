@@ -79,3 +79,71 @@ export const markAttendance = async (req: AuthRequest, res: Response) => {
         res.status(500).json({ message: "Error processing attendance" });
     }
 }
+
+export const getStudentStats = async (req: AuthRequest, res: Response) => {
+    try {
+        const studentId = req.user?.userId;
+
+        if (!studentId) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        // 1. Get Total Classes Joined
+        // We look up the student profile and count connected classrooms
+        const studentProfile = await db.studentProfile.findUnique({
+            where: { userId: studentId },
+            include: {
+                _count: {
+                    select: { classrooms: true }
+                }
+            }
+        });
+
+        const totalClasses = studentProfile?._count.classrooms || 0;
+
+        // 2. Get All Attendance Records for Stats
+        const allRecords = await db.attendance.findMany({
+            where: { studentId: studentId }
+        });
+
+        const totalSessions = allRecords.length;
+        const presentSessions = allRecords.filter(r => r.status === "PRESENT").length;
+        
+        // Calculate Percentage (Avoid division by zero)
+        const attendancePercentage = totalSessions > 0 
+            ? Math.round((presentSessions / totalSessions) * 100) 
+            : 0;
+
+        // 3. Get Recent History (Limited to 5, Sorted by Date)
+        const recentHistory = await db.attendance.findMany({
+            where: { studentId: studentId },
+            orderBy: { date: 'desc' },
+            take: 5,
+            include: {
+                classroom: {
+                    select: { name: true, code: true }
+                }
+            }
+        });
+
+        // Format history to match Frontend UI needs
+        const formattedHistory = recentHistory.map(record => ({
+            id: record.id,
+            class: record.classroom.name,
+            date: new Date(record.date).toLocaleDateString("en-US", { 
+                month: 'short', day: 'numeric', year: 'numeric' 
+            }),
+            status: record.status === "PRESENT" ? "Present" : "Absent"
+        }));
+
+        res.json({
+            totalClasses,
+            attendancePercentage,
+            history: formattedHistory
+        });
+
+    } catch (error) {
+        console.error("Stats Error:", error);
+        res.status(500).json({ message: "Error fetching dashboard stats" });
+    }
+}

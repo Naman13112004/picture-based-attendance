@@ -92,3 +92,58 @@ export const getClassrooms = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ message: "Server error" });
   }
 }
+
+// UPDATE CLASS
+export const updateClassroom = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name } = req.body;
+    const userId = req.user?.userId;
+
+    if (!id) {
+      return res.status(400).json({ message: "Classroom ID is required" });
+    }
+
+    // Verify ownership
+    const classroom = await db.classroom.findUnique({ where: { id } });
+    if (!classroom) return res.status(404).json({ message: "Classroom not found" });
+    if (classroom.teacherId !== userId) return res.status(403).json({ message: "Unauthorized" });
+
+    const updated = await db.classroom.update({
+      where: { id },
+      data: { name }
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error updating classroom" });
+  }
+}
+
+// DELETE CLASS
+export const deleteClassroom = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+
+    if (!id) {
+      return res.status(400).json({ message: "Classroom ID is required" });
+    }
+
+    // Verify ownership
+    const classroom = await db.classroom.findUnique({ where: { id } });
+    if (!classroom) return res.status(404).json({ message: "Classroom not found" });
+    if (classroom.teacherId !== userId) return res.status(403).json({ message: "Unauthorized" });
+
+    // Delete (Prisma handles cascade delete if configured in schema, 
+    // otherwise you might need to delete attendance/relations first. 
+    // Assuming cascade or simple delete for now)
+    await db.classroom.delete({ where: { id } });
+
+    res.json({ message: "Classroom deleted successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error deleting classroom" });
+  }
+}

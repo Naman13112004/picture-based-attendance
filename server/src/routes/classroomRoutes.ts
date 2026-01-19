@@ -1,6 +1,12 @@
 import { Router } from 'express';
 import { authenticate, requireRole } from '../middlewares/authMiddleware.js';
-import { createClassroom, joinClassroom, getClassrooms } from '../controllers/classroomController.js';
+import { 
+    createClassroom, 
+    joinClassroom, 
+    getClassrooms, 
+    updateClassroom, 
+    deleteClassroom 
+} from '../controllers/classroomController.js';
 
 const router = Router();
 
@@ -12,5 +18,8 @@ router.post('/create', authenticate, requireRole('TEACHER'), createClassroom);
 
 // Join Class (Student Only)
 router.post('/join', authenticate, requireRole('STUDENT'), joinClassroom);
+
+router.put('/:id', authenticate, requireRole('TEACHER'), updateClassroom);
+router.delete('/:id', authenticate, requireRole('TEACHER'), deleteClassroom);
 
 export default router;
