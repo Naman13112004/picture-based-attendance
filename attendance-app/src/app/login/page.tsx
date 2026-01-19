@@ -18,6 +18,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Loader2 } from "lucide-react";
 import api from "@/lib/api";
+import { useAuth } from "@/store/useAuth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -41,6 +42,8 @@ export default function LoginPage() {
       // Save Token
       localStorage.setItem('token', response.data.token);
       localStorage.setItem('user', JSON.stringify(response.data.user));
+
+      useAuth.getState().hydrate();
 
       // Check if the user is logging into the correct portal
       // (Optional: You can force redirect based on the actual role from DB)

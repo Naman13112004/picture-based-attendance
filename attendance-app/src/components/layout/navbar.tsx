@@ -13,11 +13,11 @@ import { useAuth } from "@/store/useAuth";
 export default function Navbar() {
   const { theme, setTheme } = useTheme();
   const pathname = usePathname(); // Get current path
-  
+
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  const { token, role } = useAuth();
+  const { token, role, hasHydrated, hydrate } = useAuth();
   const isLoggedIn = !!token;
 
   const toggleTheme = () => {
@@ -26,18 +26,19 @@ export default function Navbar() {
 
   useEffect(() => {
     setMounted(true);
+    hydrate();
   }, []);
 
   // Helper to determine where the main button should go
   const getDashboardLink = () => {
-      if (role === "TEACHER") return "/dashboard/teacher";
-      return "/dashboard/student"; // Default to student
+    if (role === "TEACHER") return "/dashboard/teacher";
+    return "/dashboard/student"; // Default to student
   };
 
   // Condition to hide button: if we are already inside /dashboard
   const isDashboard = pathname?.startsWith("/dashboard");
 
-  if(!mounted) return null;
+  if (!mounted || !hasHydrated) return null;
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
@@ -57,35 +58,35 @@ export default function Navbar() {
             <Button variant="ghost" size="icon" onClick={toggleTheme} className="cursor-pointer">
               {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
             </Button>
-            
+
             {/* Logic for Main CTA Button */}
             {!isDashboard && (
-                <>
-                    {isLoggedIn ? (
-                        <Link href={getDashboardLink()}>
-                             <Button className="cursor-pointer gap-2">
-                                <LayoutDashboard className="h-4 w-4" /> 
-                                Dashboard
-                             </Button>
-                        </Link>
-                    ) : (
-                        <Link href="/register">
-                            <Button className="cursor-pointer">Get Started</Button>
-                        </Link>
-                    )}
-                </>
+              <>
+                {isLoggedIn ? (
+                  <Link href={getDashboardLink()}>
+                    <Button className="cursor-pointer gap-2">
+                      <LayoutDashboard className="h-4 w-4" />
+                      Dashboard
+                    </Button>
+                  </Link>
+                ) : (
+                  <Link href="/register">
+                    <Button className="cursor-pointer">Get Started</Button>
+                  </Link>
+                )}
+              </>
             )}
           </div>
         </div>
 
         {/* Mobile Menu Toggle */}
         <div className="md:hidden flex items-center">
-            <Button variant="ghost" size="icon" onClick={toggleTheme} className="mr-2">
-              {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </Button>
-            <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
-                <Menu className="h-6 w-6" />
-            </Button>
+          <Button variant="ghost" size="icon" onClick={toggleTheme} className="mr-2">
+            {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+          </Button>
+          <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
+            <Menu className="h-6 w-6" />
+          </Button>
         </div>
       </div>
 
@@ -102,19 +103,19 @@ export default function Navbar() {
               <Link href="/about" className="text-sm font-medium" onClick={() => setIsMobileMenuOpen(false)}>
                 How it Works
               </Link>
-              
+
               {!isDashboard && (
-                  isLoggedIn ? (
-                    <Link href={getDashboardLink()} onClick={() => setIsMobileMenuOpen(false)}>
-                        <Button className="w-full gap-2">
-                            <LayoutDashboard className="h-4 w-4" /> Dashboard
-                        </Button>
-                    </Link>
-                  ) : (
-                    <Link href="/register" onClick={() => setIsMobileMenuOpen(false)}>
-                        <Button className="w-full">Get Started</Button>
-                    </Link>
-                  )
+                isLoggedIn ? (
+                  <Link href={getDashboardLink()} onClick={() => setIsMobileMenuOpen(false)}>
+                    <Button className="w-full gap-2">
+                      <LayoutDashboard className="h-4 w-4" /> Dashboard
+                    </Button>
+                  </Link>
+                ) : (
+                  <Link href="/register" onClick={() => setIsMobileMenuOpen(false)}>
+                    <Button className="w-full">Get Started</Button>
+                  </Link>
+                )
               )}
             </div>
           </motion.div>

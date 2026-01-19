@@ -19,6 +19,7 @@ import {
 import api from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { GoogleAuthButton } from "@/components/google-auth-button";
+import { useAuth } from "@/store/useAuth";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -48,6 +49,8 @@ export default function RegisterPage() {
       // Save token and user info
       localStorage.setItem('token', response.data.token);
       localStorage.setItem('user', JSON.stringify(response.data.user));
+
+      useAuth.getState().hydrate();
 
       // Redirect
       if (role === "teacher") {

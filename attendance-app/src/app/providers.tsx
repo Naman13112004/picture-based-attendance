@@ -7,7 +7,7 @@ import { useEffect } from "react";
 import { useAuth } from "@/store/useAuth";
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  const setAuth = useAuth((s) => s.setAuth);
+  const setAuth = useAuth((s) => s.hydrate);
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
 
   useEffect(() => {
@@ -15,7 +15,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     const user = localStorage.getItem("user");
 
     if (token && user) {
-      setAuth(token, JSON.parse(user).role);
+      setAuth();
     }
   }, []);
 

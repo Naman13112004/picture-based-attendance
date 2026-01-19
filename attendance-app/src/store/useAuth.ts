@@ -6,18 +6,31 @@ type Role = "STUDENT" | "TEACHER" | null;
 interface AuthState {
   token: string | null;
   role: Role;
-  setAuth: (token: string, role: Role) => void;
+  hasHydrated: boolean;
+  hydrate: () => void;
   clearAuth: () => void;
 }
 
 export const useAuth = create<AuthState>((set) => ({
   token: null,
   role: null,
-  setAuth: (token, role) => {
-    localStorage.setItem("token", token);
-    localStorage.setItem("user", JSON.stringify({ role }));
-    set({ token, role });
+  hasHydrated: false,
+
+  hydrate: () => {
+    if (typeof window === "undefined") return;
+
+    const token = localStorage.getItem("token");
+    const user = localStorage.getItem("user");
+
+    const role: Role = user ? JSON.parse(user).role : null;
+
+    set({
+      token,
+      role,
+      hasHydrated: true,
+    });
   },
+
   clearAuth: () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");

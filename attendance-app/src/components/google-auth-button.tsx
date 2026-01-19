@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import api from "@/lib/api";
+import { useAuth } from "@/store/useAuth";
 
 interface GoogleAuthButtonProps {
   role?: "student" | "teacher"; // Optional: pass role if known (e.g. from register page)
@@ -33,6 +34,8 @@ export function GoogleAuthButton({ role = "student" }: GoogleAuthButtonProps) {
         // Save backend JWT
         localStorage.setItem("token", res.data.token);
         localStorage.setItem("user", JSON.stringify(res.data.user));
+
+        useAuth.getState().hydrate();
 
         // Redirect
         if (res.data.user.role === "TEACHER") {
