@@ -147,3 +147,77 @@ export const getStudentStats = async (req: AuthRequest, res: Response) => {
         res.status(500).json({ message: "Error fetching dashboard stats" });
     }
 }
+
+export const getClassAttendanceHistory = async (req: AuthRequest, res: Response) => {
+    try {
+        const { classId } = req.params;
+        const { date } = req.query;
+
+        if (!date) {
+            return res.status(400).json({ error: "Date is required" });
+        }
+
+        if(!classId) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        // Parse date to search the entire day (00:00 to 23:59)
+        const searchDate = new Date(date as string);
+        const startOfDay = new Date(searchDate.setHours(0, 0, 0, 0));
+        const endOfDay = new Date(searchDate.setHours(23, 59, 59, 999));
+
+        // 1. Get the Class with all enrolled Students
+        // We need the full roster to show who was Absent
+        const classroom = await db.classroom.findUnique({
+            where: { id: classId },
+            include: {
+                students: {
+                    include: {
+                        user: {
+                            select: { id: true, name: true, email: true, avatar: true }
+                        }
+                    }
+                }
+            }
+        });
+
+        if (!classroom) {
+            return res.status(404).json({ error: "Classroom not found" });
+        }
+
+        // 2. Get Attendance records for this Class on this Date
+        const attendanceRecords = await db.attendance.findMany({
+            where: {
+                classId: classId,
+                date: {
+                    gte: startOfDay,
+                    lte: endOfDay
+                }
+            }
+        });
+
+        // 3. Merge Data: Map over students and find their status
+        const history = classroom.students.map(profile => {
+            const record = attendanceRecords.find(r => r.studentId === profile.user.id);
+            return {
+                studentId: profile.user.id,
+                name: profile.user.name,
+                email: profile.user.email,
+                avatar: profile.user.avatar,
+                status: record ? record.status : 'ABSENT', // Default to ABSENT if no record found
+                time: record ? record.date : null
+            };
+        });
+
+        res.json({
+            date: startOfDay,
+            totalStudents: classroom.students.length,
+            presentCount: attendanceRecords.filter(r => r.status === 'PRESENT').length,
+            records: history
+        });
+
+    } catch (error) {
+        console.error("History fetch error:", error);
+        res.status(500).json({ error: "Failed to fetch history" });
+    }
+};
