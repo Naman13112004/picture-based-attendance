@@ -14,7 +14,8 @@ import {
     UserCheck,
     UserX,
     Search,
-    CalendarIcon
+    CalendarIcon,
+    Edit2
 } from "lucide-react";
 import {
     Card,
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ManualAttendanceModal } from "@/components/modals/manual-attendance-modal";
 
 // Define the shape of our student record from the API
 interface StudentRecord {
@@ -52,6 +54,9 @@ const TeacherClassDetails = () => {
     const [historyLoading, setHistoryLoading] = useState(false);
     const [studentRecords, setStudentRecords] = useState<StudentRecord[]>([]);
     const [stats, setStats] = useState({ total: 0, present: 0 });
+
+    // --- Modal State ---
+    const [isManualModalOpen, setIsManualModalOpen] = useState(false);
 
     // 1. Fetch History Function
     const fetchHistory = useCallback(async (date: string) => {
@@ -130,6 +135,15 @@ const TeacherClassDetails = () => {
         }
     }
 
+    const handleManualSuccess = () => {
+        // Refresh the list after manual edit
+        fetchHistory(selectedDate);
+
+        // Optional: If we just processed an image and then manually edited, 
+        // we might want to update the "Results" card too, but usually refreshing 
+        // the history list is sufficient as that's the source of truth.
+    };
+
     return (
         <div className="grid gap-6 md:grid-cols-2">
             {/* Upload Section */}
@@ -179,6 +193,21 @@ const TeacherClassDetails = () => {
                         onClick={handleProcessAttendance}
                     >
                         {status === 'idle' ? "Process Attendance" : status === 'complete' ? "Attendance Taken" : "Processing..."}
+                    </Button>
+
+                    <div className="relative flex items-center py-2">
+                        <div className="grow border-t border-muted"></div>
+                        <span className="shrink-0 mx-4 text-xs text-muted-foreground">OR</span>
+                        <div className="grow border-t border-muted"></div>
+                    </div>
+
+                    <Button
+                        variant="outline"
+                        className="w-full cursor-pointer gap-2"
+                        onClick={() => setIsManualModalOpen(true)}
+                    >
+                        <Edit2 className="h-4 w-4" />
+                        Manual Attendance / Corrections
                     </Button>
                 </CardContent>
             </Card>
@@ -231,12 +260,12 @@ const TeacherClassDetails = () => {
                                 <CardTitle>Attendance Records</CardTitle>
                                 <CardDescription>View status by date.</CardDescription>
                             </div>
-                            
+
                             {/* DATE PICKER */}
                             <div className="relative">
                                 <CalendarIcon className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                                <Input 
-                                    type="date" 
+                                <Input
+                                    type="date"
                                     className="pl-9 w-full sm:w-45 cursor-pointer"
                                     value={selectedDate}
                                     onChange={(e) => setSelectedDate(e.target.value)}
@@ -244,7 +273,7 @@ const TeacherClassDetails = () => {
                             </div>
                         </div>
                     </CardHeader>
-                    
+
                     <Separator />
 
                     <CardContent className="flex-1 p-0">
@@ -289,12 +318,11 @@ const TeacherClassDetails = () => {
                                                     <p className="text-xs text-muted-foreground">{student.email}</p>
                                                 </div>
                                             </div>
-                                            
-                                            <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border ${
-                                                student.status === 'PRESENT' 
-                                                    ? 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-900' 
-                                                    : 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-900'
-                                            }`}>
+
+                                            <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border ${student.status === 'PRESENT'
+                                                ? 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-900'
+                                                : 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-900'
+                                                }`}>
                                                 {student.status === 'PRESENT' ? (
                                                     <>
                                                         <UserCheck className="h-3 w-3" /> Present
@@ -313,6 +341,16 @@ const TeacherClassDetails = () => {
                     </CardContent>
                 </Card>
             </div>
+
+            {/* MANUAL ATTENDANCE MODAL */}
+            <ManualAttendanceModal
+                isOpen={isManualModalOpen}
+                onClose={() => setIsManualModalOpen(false)}
+                classId={classId}
+                date={selectedDate}
+                students={studentRecords} // Pass current backend state
+                onUpdateSuccess={handleManualSuccess}
+            />
         </div>
     );
 };
