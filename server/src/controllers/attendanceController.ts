@@ -32,8 +32,8 @@ export const markAttendance = async (req: AuthRequest, res: Response) => {
             students: classroom.students.map(student => ({
                 id: student.userId, // We identify them by UserID
                 image_paths: [
-                    student.faceData1, 
-                    student.faceData2, 
+                    student.faceData1,
+                    student.faceData2,
                     student.faceData3
                 ].filter(path => path !== null) as string[] // Remove nulls
             }))
@@ -42,22 +42,22 @@ export const markAttendance = async (req: AuthRequest, res: Response) => {
         // 3. Call Python AI Service
         console.log("Calling Python AI Service...");
         const aiResponse = await axios.post(PYTHON_API_URL, pythonPayload);
-        
+
         const { present_student_ids } = aiResponse.data;
         console.log("AI Results:", present_student_ids);
 
         // 4. Update Database
         // We create attendance records for ALL students in the class
         const today = new Date();
-        
+
         // Transaction ensures all records are created or none
         await db.$transaction(async (tx) => {
             // First, delete any existing attendance for this class/date to prevent duplicates (optional logic)
             // For MVP, we just create new records
-            
+
             for (const student of classroom.students) {
                 const isPresent = present_student_ids.includes(student.userId);
-                
+
                 await tx.attendance.create({
                     data: {
                         date: today,
@@ -69,7 +69,7 @@ export const markAttendance = async (req: AuthRequest, res: Response) => {
             }
         });
 
-        res.json({ 
+        res.json({
             message: "Attendance marked successfully",
             results: aiResponse.data
         });
@@ -108,10 +108,10 @@ export const getStudentStats = async (req: AuthRequest, res: Response) => {
 
         const totalSessions = allRecords.length;
         const presentSessions = allRecords.filter(r => r.status === "PRESENT").length;
-        
+
         // Calculate Percentage (Avoid division by zero)
-        const attendancePercentage = totalSessions > 0 
-            ? Math.round((presentSessions / totalSessions) * 100) 
+        const attendancePercentage = totalSessions > 0
+            ? Math.round((presentSessions / totalSessions) * 100)
             : 0;
 
         // 3. Get Recent History (Limited to 5, Sorted by Date)
@@ -130,8 +130,8 @@ export const getStudentStats = async (req: AuthRequest, res: Response) => {
         const formattedHistory = recentHistory.map(record => ({
             id: record.id,
             class: record.classroom.name,
-            date: new Date(record.date).toLocaleDateString("en-US", { 
-                month: 'short', day: 'numeric', year: 'numeric' 
+            date: new Date(record.date).toLocaleDateString("en-US", {
+                month: 'short', day: 'numeric', year: 'numeric'
             }),
             status: record.status === "PRESENT" ? "Present" : "Absent"
         }));
@@ -157,7 +157,7 @@ export const getClassAttendanceHistory = async (req: AuthRequest, res: Response)
             return res.status(400).json({ error: "Date is required" });
         }
 
-        if(!classId) {
+        if (!classId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
 
@@ -219,5 +219,54 @@ export const getClassAttendanceHistory = async (req: AuthRequest, res: Response)
     } catch (error) {
         console.error("History fetch error:", error);
         res.status(500).json({ error: "Failed to fetch history" });
+    }
+};
+
+export const updateManualAttendance = async (req: AuthRequest, res: Response) => {
+    try {
+        const { classId, date, updates } = req.body;
+        // updates is an array: [{ studentId: "123", status: "PRESENT" }, ...]
+
+        if (!classId || !date || !Array.isArray(updates)) {
+            return res.status(400).json({ error: "Invalid request data" });
+        }
+
+        const targetDate = new Date(date);
+        const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
+        const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
+
+        await db.$transaction(async (tx) => {
+            for (const update of updates) {
+                const existing = await tx.attendance.findFirst({
+                    where: {
+                        studentId: update.studentId,
+                        classId,
+                        date: { gte: startOfDay, lte: endOfDay }
+                    }
+                });
+
+                if (existing) {
+                    await tx.attendance.update({
+                        where: { id: existing.id },
+                        data: { status: update.status }
+                    });
+                } else {
+                    await tx.attendance.create({
+                        data: {
+                            studentId: update.studentId,
+                            classId,
+                            status: update.status,
+                            date: new Date(date)
+                        }
+                    });
+                }
+            }
+        });
+
+        res.json({ message: "Attendance updated successfully" });
+
+    } catch (error) {
+        console.error("Manual update error:", error);
+        res.status(500).json({ error: "Failed to update attendance" });
     }
 };
