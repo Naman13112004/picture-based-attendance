@@ -5,14 +5,15 @@ import { ThemeProvider } from "@/components/theme-provider";
 
 import { useEffect } from "react";
 import { useAuth } from "@/store/useAuth";
+import Cookies from "js-cookie";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const setAuth = useAuth((s) => s.hydrate);
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    const user = localStorage.getItem("user");
+    const token = Cookies.get("token");
+    const user = Cookies.get("user");
 
     if (token && user) {
       setAuth();

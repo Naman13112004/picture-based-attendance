@@ -1,9 +1,10 @@
 "use client";
 
 import api from "@/lib/api";
+import Cookies from 'js-cookie';
 import { cn } from "@/lib/utils";
-import { GoogleAuthButton } from "@/components/google-auth-button";
 import { useAuth } from "@/store/useAuth";
+import { GoogleAuthButton } from "@/components/google-auth-button";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -39,8 +40,9 @@ const RegisterForm = () => {
             });
 
             // Save token and user info
-            localStorage.setItem('token', response.data.token);
-            localStorage.setItem('user', JSON.stringify(response.data.user));
+            const { token, user } = response.data;
+            Cookies.set('token', token, { expires: 7 });
+            Cookies.set('user', JSON.stringify(user), { expires: 7 });
 
             useAuth.getState().hydrate();
 

@@ -8,17 +8,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GoogleAuthButton } from "@/components/google-auth-button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
+    Card,
+    CardContent,
+    CardDescription,
+    CardFooter,
+    CardHeader,
+    CardTitle,
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Loader2 } from "lucide-react";
 import api from "@/lib/api";
 import { useAuth } from "@/store/useAuth";
+import Cookies from 'js-cookie';
 
 const LoginTabs = () => {
     const router = useRouter();
@@ -39,9 +40,10 @@ const LoginTabs = () => {
                 password
             });
 
-            // Save Token
-            localStorage.setItem('token', response.data.token);
-            localStorage.setItem('user', JSON.stringify(response.data.user));
+            // Save token and user info
+            const { token, user } = response.data;
+            Cookies.set('token', token, { expires: 7 });
+            Cookies.set('user', JSON.stringify(user), { expires: 7 });
 
             useAuth.getState().hydrate();
 

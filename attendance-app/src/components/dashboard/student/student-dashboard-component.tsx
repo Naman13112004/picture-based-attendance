@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CheckCircle2, XCircle, Loader2, LayoutDashboard } from "lucide-react";
+
 import api from "@/lib/api";
+import Cookies from "js-cookie";
 
 // Define the shape of our data
 interface DashboardData {
@@ -23,8 +25,8 @@ const StudentDashboardComponent = () => {
   const [userName, setUserName] = useState("Student");
 
   useEffect(() => {
-    // 1. Get User Name from LocalStorage for the welcome message
-    const userStr = localStorage.getItem("user");
+    // 1. Get User Name from cookies for the welcome message
+    const userStr = Cookies.get("user");
     if (userStr) {
       try {
         const user = JSON.parse(userStr);

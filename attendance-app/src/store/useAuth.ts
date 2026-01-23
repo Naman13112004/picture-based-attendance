@@ -1,5 +1,6 @@
 // store/useAuth.ts
 import { create } from "zustand";
+import Cookies from "js-cookie";
 
 type Role = "STUDENT" | "TEACHER" | null;
 
@@ -19,21 +20,28 @@ export const useAuth = create<AuthState>((set) => ({
   hydrate: () => {
     if (typeof window === "undefined") return;
 
-    const token = localStorage.getItem("token");
-    const user = localStorage.getItem("user");
+    const token = Cookies.get("token");
+    const userStr = Cookies.get("user");
 
-    const role: Role = user ? JSON.parse(user).role : null;
+    let role: Role = null;
+    if (userStr) {
+        try {
+            role = JSON.parse(userStr).role;
+        } catch (e) {
+            console.error("Failed to parse user cookie", e);
+        }
+    }
 
     set({
-      token,
+      token: token || null,
       role,
       hasHydrated: true,
     });
   },
 
   clearAuth: () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    Cookies.remove("token");
+    Cookies.remove("user");
     set({ token: null, role: null });
   },
 }));
