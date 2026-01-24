@@ -14,7 +14,7 @@ export const markAttendance = async (req: AuthRequest, res: Response) => {
         // 1. Save Class Photo
         const filename = `class_${classId}_${Date.now()}.jpg`;
         // Save in 'class_photos' folder
-        const classImagePath = saveBase64Image(image, 'class_photos', filename);
+        const classImagePath = await saveBase64Image(image, 'class_photos', filename);
 
         // 2. Fetch Enrolled Students & Their Reference Photos
         const classroom = await db.classroom.findUnique({
@@ -40,7 +40,7 @@ export const markAttendance = async (req: AuthRequest, res: Response) => {
         };
 
         // 3. Call Python AI Service
-        console.log("Calling Python AI Service...");
+        console.log("Calling Python AI Service with URLs...");
         const aiResponse = await axios.post(PYTHON_API_URL, pythonPayload);
 
         const { present_student_ids } = aiResponse.data;

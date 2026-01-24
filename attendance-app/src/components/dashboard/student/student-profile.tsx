@@ -15,8 +15,6 @@ import {
     CardTitle 
 } from "@/components/ui/card";
 
-const API_URL = 'http://localhost:5000'; // For constructing image URLs
-
 const StudentProfile = () => {
     // State to store up to 3 image base64 strings
     // Using null to represent an empty slot
@@ -32,12 +30,11 @@ const StudentProfile = () => {
             try {
                 const res = await api.get('/profile');
                 if (res.data) {
-                    // Backend returns paths like "/uploads/..."
-                    // We need to prepend the server URL to display them
+                    // Backend returns full urls
                     const loadedImages = [
-                        res.data.faceData1 ? `${API_URL}${res.data.faceData1}` : null,
-                        res.data.faceData2 ? `${API_URL}${res.data.faceData2}` : null,
-                        res.data.faceData3 ? `${API_URL}${res.data.faceData3}` : null,
+                        res.data.faceData1 || null,
+                        res.data.faceData2 || null,
+                        res.data.faceData3 || null,
                     ];
                     setImages(loadedImages);
                 }

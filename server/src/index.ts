@@ -5,6 +5,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import morgan from 'morgan';
 import { fileURLToPath } from 'url';
+import { startCleanupJob } from './services/cleanupService.js';
 
 import authRoutes from './routes/authRoutes.js';
 import profileRoutes from './routes/profileRoutes.js';
@@ -12,6 +13,9 @@ import classroomRoutes from './routes/classroomRoutes.js';
 import attendanceRoutes from './routes/attendanceRoutes.js';
 
 dotenv.config();
+
+// Start the cron job
+startCleanupJob();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -25,9 +29,6 @@ app.use(cors()); // Fixes CORS issues
 app.use(express.json({ limit: "50mb" })); // Parses JSON bodies
 app.use(express.urlencoded({ limit: "50mb", extended: true })); // Increase urlencoded limit as well
 app.use(morgan('dev')); // Logger
-
-// Serve Static Files (Uploaded Images)
-app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
 
 // Health Check
 app.get('/', (req, res) => {

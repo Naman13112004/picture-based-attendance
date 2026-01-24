@@ -1,68 +1,70 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import cv2
+import face_recognition
 import numpy as np
-import os
+import requests
+from io import BytesIO
 from typing import List
 
 app = FastAPI()
 
-BASE_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..")
-)
-
-def resolve_upload_path(relative_path: str) -> str:
-    clean_path = relative_path.lstrip("/")  # remove leading slash
-    return os.path.join(BASE_DIR, clean_path)
-
 # --- Data Models (Schema) ---
-# This defines what data Node.js sends to us
 class Student(BaseModel):
     id: str
-    image_paths: List[str]  # ["uploads/user1/face1.jpg", "uploads/user1/face2.jpg"]
+    image_paths: List[str]  # Now expects Full URLs: ["https://supa.../face1.jpg", ...]
 
 class AttendanceRequest(BaseModel):
-    class_image_path: str   # "uploads/class_photos/class_101.jpg"
-    students: List[Student] # List of all students in that class
+    class_image_path: str   # Now expects Full URL: "https://supa.../class_101.jpg"
+    students: List[Student]
 
-# --- Helper Function ---
-def get_face_encodings(image_path: str):
-    import face_recognition
+# --- Helper Function: Download Image ---
+def load_image_from_url(url: str):
     """
-    Loads an image and returns the 128-dimensional face encoding.
-    Returns None if no face is found or file doesn't exist.
+    Downloads an image from a URL and converts it to a numpy array 
+    usable by face_recognition.
     """
-    # Adjust path relative to where you run the python script
-    # We assume 'uploads' is in the parent directory of 'python-service'
-    full_path = resolve_upload_path(image_path)
+    try:
+        response = requests.get(url, timeout=10) # 10s timeout
+        response.raise_for_status() # Raise error for 404/500
+        
+        # Load image from bytes
+        # face_recognition.load_image_file accepts a file-like object (BytesIO)
+        image = face_recognition.load_image_file(BytesIO(response.content))
+        return image
+    except Exception as e:
+        print(f"Failed to download or load image from {url}: {e}")
+        return None
 
-    if not os.path.exists(full_path):
-        print(f"File not found: {full_path}")
+# --- Helper Function: Get Encodings ---
+def get_face_encodings(image_url: str):
+    """
+    Loads an image from URL and returns the 128-dimensional face encoding.
+    """
+    image = load_image_from_url(image_url)
+    
+    if image is None:
         return []
 
     try:
-        # Load image
-        image = face_recognition.load_image_file(full_path)
-        # Get encodings (machine readable face data)
+        # Get encodings
         encodings = face_recognition.face_encodings(image)
         return encodings
     except Exception as e:
-        print(f"Error processing {full_path}: {e}")
+        print(f"Error processing encodings for {image_url}: {e}")
         return []
 
 # --- Main Endpoint ---
 @app.post("/recognize")
 async def recognize_faces(data: AttendanceRequest):
-    import face_recognition
     print(f"Processing class image: {data.class_image_path}")
     
-    # 1. Process the Class Photo
-    full_class_path = resolve_upload_path(data.class_image_path)
-    if not os.path.exists(full_class_path):
-        raise HTTPException(status_code=404, detail="Class photo not found")
+    # 1. Download and Process the Class Photo
+    class_image = load_image_from_url(data.class_image_path)
+    
+    if class_image is None:
+        raise HTTPException(status_code=400, detail="Could not download class photo from URL")
 
     try:
-        class_image = face_recognition.load_image_file(full_class_path)
         # Find all face locations and encodings in the group photo
         # model="hog" is faster (CPU), "cnn" is more accurate (GPU required)
         class_face_locations = face_recognition.face_locations(class_image, model="hog")
@@ -75,29 +77,30 @@ async def recognize_faces(data: AttendanceRequest):
 
     present_students = []
 
-    # 2. Iterate through each enrolled student to check if they are present
+    # 2. Iterate through each enrolled student
     for student in data.students:
         student_known_encodings = []
 
-        # Load all 3 reference photos for this student
-        for img_path in student.image_paths:
-            encs = get_face_encodings(img_path)
+        # Load reference photos from URLs
+        for img_url in student.image_paths:
+            # Skip empty URLs if any
+            if not img_url: 
+                continue
+                
+            encs = get_face_encodings(img_url)
             if encs:
                 student_known_encodings.extend(encs)
         
         if not student_known_encodings:
-            print(f"Skipping student {student.id}: No valid reference photos found.")
+            print(f"Skipping student {student.id}: No valid reference photos downloaded.")
             continue
 
         # 3. Compare Student References vs All Class Faces
-        # We check if ANY of the student's reference faces match ANY face in the class photo
         match_found = False
-        
-        # 'tolerance' is how strict the match is. Lower (e.g. 0.5) is stricter, 0.6 is standard.
         tolerance = 0.6 
 
         for known_encoding in student_known_encodings:
-            # compare_faces returns a list of True/False for each face in class_face_encodings
+            # Compare against all faces in the class
             matches = face_recognition.compare_faces(class_face_encodings, known_encoding, tolerance=tolerance)
             
             if True in matches:

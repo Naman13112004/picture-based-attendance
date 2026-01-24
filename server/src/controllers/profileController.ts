@@ -20,9 +20,9 @@ export const updateStudentImages = async (req: AuthRequest, res: Response) => {
 
         // Save images to disk
         // We use the UserID as a folder name to keep things organized
-        const path1 = saveBase64Image(images[0], userId!, 'face_1.jpg');
-        const path2 = saveBase64Image(images[1], userId!, 'face_2.jpg');
-        const path3 = saveBase64Image(images[2], userId!, 'face_3.jpg');
+        const path1 = await saveBase64Image(images[0], userId!, 'face_1.jpg');
+        const path2 = await saveBase64Image(images[1], userId!, 'face_2.jpg');
+        const path3 = await saveBase64Image(images[2], userId!, 'face_3.jpg');
 
         // Update DB
         await db.studentProfile.update({
@@ -34,10 +34,10 @@ export const updateStudentImages = async (req: AuthRequest, res: Response) => {
             }
         });
 
-        res.json({ message: "Face data updated successfully" });
+        res.json({ message: "Face data updated successfully", urls: [path1, path2, path3] });
 
     } catch (error) {
-        console.error(error);
+        console.error("Profile Upload Error:", error);
         res.status(500).json({ message: 'Error saving profile images' });
     }
 };

@@ -126,6 +126,7 @@ const TeacherClassDetails = () => {
                     absent: results.absent_count
                 });
                 setStatus('complete');
+                fetchHistory(selectedDate);
             };
 
         } catch (error) {
