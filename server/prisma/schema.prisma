@@ -28,7 +28,7 @@ model Classroom {
   teacherId   String
   createdAt   DateTime         @default(now())
   attendances Attendance[]
-  teacher     User             @relation("TeacherClasses", fields: [teacherId], references: [id])
+  teacher     User             @relation("TeacherClasses", fields: [teacherId], references: [id], onDelete: Cascade)
   students    StudentProfile[] @relation("ClassroomToStudentProfile")
 }
 
@@ -38,7 +38,7 @@ model StudentProfile {
   faceData1  String?
   faceData2  String?
   faceData3  String?
-  user       User        @relation(fields: [userId], references: [id])
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   classrooms Classroom[] @relation("ClassroomToStudentProfile")
 }
 
@@ -48,8 +48,8 @@ model Attendance {
   status    Status
   studentId String
   classId   String
-  classroom Classroom @relation(fields: [classId], references: [id])
-  student   User      @relation(fields: [studentId], references: [id])
+  classroom Classroom @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student   User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
 }
 
 enum Role {
