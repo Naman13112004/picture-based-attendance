@@ -5,8 +5,8 @@
   "main": "./src/index.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon --exec tsx ./src/index.ts",
-    "build": "node --exec tsx ./src/index.ts"
+    "dev": "tsc -b && nodemon ./dist/index.js",
+    "build": "tsc -b && node ./dist/index.js"
   },
   "keywords": [],
   "author": "",
