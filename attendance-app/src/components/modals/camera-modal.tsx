@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Camera, RotateCcw, Check } from "lucide-react";
+import Image from "next/image";
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -132,7 +133,7 @@ export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
           ) : (
             // Captured Image Preview
             // eslint-disable-next-line @next/next/no-img-element
-            <img 
+            <Image 
                 src={capturedImage} 
                 alt="Captured" 
                 className="rounded-lg w-full h-auto max-h-100 object-cover transform scale-x-[-1]" 

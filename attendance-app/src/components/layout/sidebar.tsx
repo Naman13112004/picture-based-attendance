@@ -33,7 +33,7 @@ export function Sidebar({ role }: SidebarProps) {
 
   const handleLogout = () => {
     clearAuth();
-    router.push("/");
+    router.replace("/");
   };
 
   // Define routes based on role

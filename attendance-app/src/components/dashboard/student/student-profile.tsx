@@ -14,6 +14,7 @@ import {
     CardHeader, 
     CardTitle 
 } from "@/components/ui/card";
+import Image from "next/image";
 
 const StudentProfile = () => {
     // State to store up to 3 image base64 strings
@@ -124,7 +125,7 @@ const StudentProfile = () => {
                                     {imgData ? (
                                         <>
                                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                                            <img src={imgData} alt={`Reference ${index + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
+                                            <Image src={imgData} alt={`Reference ${index + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
                                             <Button
                                                 variant="destructive"
                                                 size="icon"

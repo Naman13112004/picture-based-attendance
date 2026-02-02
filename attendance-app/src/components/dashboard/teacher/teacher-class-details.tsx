@@ -27,6 +27,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ManualAttendanceModal } from "@/components/modals/manual-attendance-modal";
+import Image from "next/image";
 
 // Define the shape of our student record from the API
 interface StudentRecord {
@@ -171,7 +172,7 @@ const TeacherClassDetails = () => {
                     ) : (
                         <div className="relative rounded-lg overflow-hidden border">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={previewUrl} alt="Class Preview" className="w-full h-auto object-cover max-h-100" />
+                            <Image src={previewUrl} alt="Class Preview" className="w-full h-auto object-cover max-h-100" />
                             {status === 'idle' && (
                                 <Button variant="secondary" size="sm" className="absolute top-2 right-2 cursor-pointer" onClick={() => { setPreviewUrl(null); setFile(null) }}>Change Photo</Button>
                             )}
