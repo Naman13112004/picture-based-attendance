@@ -10,6 +10,9 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "SnapAttend | AI Attendance",
   description: "Automated classroom attendance using Face Recognition",
+  icons: {
+    icon: "/icons/Snap-Attend-bgless.svg",
+  }
 };
 
 export default function RootLayout({

@@ -3,11 +3,11 @@
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { 
-    ArrowRight, 
-    CheckCircle2, 
-    Users, 
-    ScanFace 
+import {
+    ArrowRight,
+    CheckCircle2,
+    Users,
+    ScanFace
 } from "lucide-react";
 
 const HomePage = () => {
@@ -30,7 +30,7 @@ const HomePage = () => {
     return (
         <div className="flex flex-col items-center justify-center">
             {/* Hero Section */}
-            <section className="w-full py-20 md:py-32 lg:py-40 bg-linear-to-b from-background to-muted/20">
+            <section className="w-full py-10 md:py-16 lg:py-25 bg-linear-to-b from-background to-muted/20">
                 <motion.div
                     className="container px-4 md:px-6 text-center"
                     variants={containerVariants}
@@ -38,6 +38,11 @@ const HomePage = () => {
                     animate="visible"
                 >
                     <motion.div variants={itemVariants} className="space-y-4">
+                        <img
+                            src="/icons/Snap-Attend-bgless.svg"
+                            alt="SnapAttend Logo"
+                            className="w-40 h-40 md:w-52 md:h-52 lg:w-64 lg:h-64 flex justify-center mx-auto"
+                        />
                         <h1 className="text-4xl font-extrabold tracking-tighter sm:text-5xl md:text-6xl lg:text-7xl bg-clip-text text-transparent bg-linear-to-r from-primary to-blue-600 dark:to-blue-400">
                             Attendance in a Snap.
                         </h1>
@@ -87,18 +92,18 @@ const HomePage = () => {
 
 // Simple Helper Component for the features
 function FeatureCard({ icon, title, description }: { icon: React.ReactNode, title: string, description: string }) {
-  return (
-    <motion.div 
-      whileHover={{ y: -5 }}
-      className="flex flex-col items-center text-center p-6 border rounded-xl bg-card shadow-sm hover:shadow-md transition-all"
-    >
-      <div className="mb-4 p-3 bg-primary/10 rounded-full">
-        {icon}
-      </div>
-      <h3 className="text-xl font-bold mb-2">{title}</h3>
-      <p className="text-muted-foreground">{description}</p>
-    </motion.div>
-  )
+    return (
+        <motion.div
+            whileHover={{ y: -5 }}
+            className="flex flex-col items-center text-center p-6 border rounded-xl bg-card shadow-sm hover:shadow-md transition-all"
+        >
+            <div className="mb-4 p-3 bg-primary/10 rounded-full">
+                {icon}
+            </div>
+            <h3 className="text-xl font-bold mb-2">{title}</h3>
+            <p className="text-muted-foreground">{description}</p>
+        </motion.div>
+    )
 }
 
 export default HomePage;

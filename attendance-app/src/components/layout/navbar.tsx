@@ -45,7 +45,6 @@ export default function Navbar() {
       <div className="container flex h-16 items-center justify-between px-4 md:px-8">
         {/* Logo */}
         <Link href="/" className="flex items-center space-x-2">
-          <Camera className="h-6 w-6 text-primary" />
           <span className="font-bold text-xl tracking-tight">SnapAttend</span>
         </Link>
 
