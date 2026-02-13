@@ -6,4 +6,3 @@ opencv-python-headless
 python-multipart
 requests
 pydantic
-requests
