@@ -9,6 +9,7 @@ import {
     Users,
     ScanFace
 } from "lucide-react";
+import InstallAppButton from "./install-app";
 
 const HomePage = () => {
     // Animation variants for staggered reveal
@@ -51,17 +52,20 @@ const HomePage = () => {
                             and attendance is marked instantly.
                         </p>
                     </motion.div>
-                    <motion.div variants={itemVariants} className="mt-8 flex justify-center gap-4">
-                        <Link href="/login?role=teacher">
-                            <Button size="lg" className="gap-2 cursor-pointer">
-                                Teacher Login <ArrowRight className="h-4 w-4" />
+                    <motion.div variants={itemVariants} className="mt-8 flex flex-col justify-center gap-4">
+                        <div className="flex justify-center gap-4">
+                            <Button asChild size="lg" className="gap-2 cursor-pointer">
+                                <Link href="/login?role=teacher">
+                                    Teacher Login <ArrowRight className="h-4 w-4" />
+                                </Link>
                             </Button>
-                        </Link>
-                        <Link href="/login?role=student">
-                            <Button size="lg" variant="outline" className="gap-2 cursor-pointer">
-                                Student Portal
+                            <Button asChild size="lg" variant="outline" className="gap-2 cursor-pointer">
+                                <Link href="/login?role=student">
+                                    Student Portal
+                                </Link>
                             </Button>
-                        </Link>
+                        </div>
+                        <InstallAppButton />
                     </motion.div>
                 </motion.div>
             </section>
