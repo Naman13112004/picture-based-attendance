@@ -1,0 +1,29 @@
+services:
+  backend:
+    build:
+      target: base
+    command: sh -c "npm ci && npx prisma generate && npm run dev"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+
+  frontend:
+    build:
+      target: base
+    command: sh -c "npm ci && npm run dev"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NODE_ENV=development
+
+  ai-service:
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./ai-service:/app
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1

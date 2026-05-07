@@ -9,4 +9,5 @@ export default withPWA({
   disable: isDev,
 })({
   reactCompiler: true,
+  output: "standalone",
 });
