@@ -17,13 +17,13 @@ jobs:
         include:
           - service: frontend
             context: ./frontend
-            image_name: ${{ secrets.DOCKERHUB_USERNAME }}/snapattend-frontend
+            image_suffix: snapattend-frontend
           - service: backend
             context: ./backend
-            image_name: ${{ secrets.DOCKERHUB_USERNAME }}/snapattend-backend
+            image_suffix: snapattend-backend
           - service: ai-service
             context: ./ai-service
-            image_name: ${{ secrets.DOCKERHUB_USERNAME }}/snapattend-ai-service
+            image_suffix: snapattend-ai-service
 
     steps:
     - name: Checkout repository
@@ -43,7 +43,7 @@ jobs:
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ matrix.image_name }}
+        images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image_suffix }}
         tags: |
           type=raw,value=latest,enable={{is_default_branch}}
           type=sha
