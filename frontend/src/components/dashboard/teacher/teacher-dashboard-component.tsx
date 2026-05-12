@@ -59,7 +59,7 @@ const TeacherDashboardComponent = () => {
             <div className="flex items-center justify-between">
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
-                    <p className="text-muted-foreground">Manage your classes and today's attendance.</p>
+                    <p className="text-muted-foreground">Manage your classes and today&apos;s attendance.</p>
                 </div>
                 <Button className="gap-2 cursor-pointer" onClick={openCreateModal}>
                     <Plus className="h-4 w-4" /> Create New Class

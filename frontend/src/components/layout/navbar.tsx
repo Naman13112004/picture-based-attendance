@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation"; // Added to check current route
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
-import { Moon, Sun, Menu, Camera, LayoutDashboard } from "lucide-react";
+import { Moon, Sun, Menu, LayoutDashboard } from "lucide-react";
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/store/useAuth";
@@ -25,9 +25,10 @@ export default function Navbar() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
     hydrate();
-  }, []);
+  }, [hydrate]);
 
   // Helper to determine where the main button should go
   const getDashboardLink = () => {

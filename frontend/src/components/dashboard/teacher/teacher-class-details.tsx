@@ -171,7 +171,7 @@ const TeacherClassDetails = () => {
                         </div>
                     ) : (
                         <div className="relative rounded-lg overflow-hidden border">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            { }
                             <Image src={previewUrl} alt="Class Preview" className="w-full h-auto object-cover max-h-100" />
                             {status === 'idle' && (
                                 <Button variant="secondary" size="sm" className="absolute top-2 right-2 cursor-pointer" onClick={() => { setPreviewUrl(null); setFile(null) }}>Change Photo</Button>

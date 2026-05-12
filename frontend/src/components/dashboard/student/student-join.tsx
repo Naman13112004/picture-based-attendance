@@ -16,8 +16,9 @@ const StudentJoin = () => {
             const res = await api.post('/classrooms/join', { code });
             alert(res.data.message); // "Successfully joined Class Name"
             setCode("");
-        } catch (error: any) {
-            alert(error.response?.data?.message || "Failed to join class");
+        } catch (error: unknown) {
+            const e = error as { response?: { data?: { message?: string } } };
+            alert(e.response?.data?.message || "Failed to join class");
         } finally {
             setIsLoading(false);
         }

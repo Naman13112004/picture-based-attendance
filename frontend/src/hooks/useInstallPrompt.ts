@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
 
+type BeforeInstallPromptEvent = Event & { prompt: () => void; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> };
+
 export function useInstallPrompt() {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstallable, setIsInstallable] = useState(false);
 
   useEffect(() => {
-    const handler = (e: any) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
+    const handler = (e: Event) => {
+      const event = e as BeforeInstallPromptEvent;
+      event.preventDefault();
+      setDeferredPrompt(event);
       setIsInstallable(true);
     };
 

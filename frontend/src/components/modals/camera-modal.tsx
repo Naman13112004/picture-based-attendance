@@ -132,7 +132,7 @@ export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
             />
           ) : (
             // Captured Image Preview
-            // eslint-disable-next-line @next/next/no-img-element
+             
             <Image 
                 src={capturedImage} 
                 alt="Captured" 

@@ -31,7 +31,7 @@ const LoginTabs = () => {
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
 
-    const handleLogin = async (role: string) => {
+    const handleLogin = async () => {
         setIsLoading(true);
         setError("");
         try {
@@ -57,8 +57,9 @@ const LoginTabs = () => {
                 router.push("/dashboard/student");
             }
 
-        } catch (err: any) {
-            setError(err.response?.data?.message || "Login failed");
+        } catch (err: unknown) {
+            const e = err as { response?: { data?: { message?: string } } };
+            setError(e.response?.data?.message || "Login failed");
         } finally {
             setIsLoading(false);
         }
@@ -88,7 +89,7 @@ const LoginTabs = () => {
                             <Label htmlFor="s-password">Password</Label>
                             <Input id="s-password" type="password" value={password} onChange={e => setPassword(e.target.value)} />
                         </div>
-                        <Button className="w-full cursor-pointer" onClick={() => handleLogin("student")} disabled={isLoading}>
+                        <Button className="w-full cursor-pointer" onClick={() => handleLogin()} disabled={isLoading}>
                             {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Login as Student"}
                         </Button>
 
@@ -119,7 +120,7 @@ const LoginTabs = () => {
                             <Label htmlFor="t-password">Password</Label>
                             <Input id="t-password" type="password" value={password} onChange={e => setPassword(e.target.value)} />
                         </div>
-                        <Button className="w-full cursor-pointer" onClick={() => handleLogin("teacher")} disabled={isLoading}>
+                        <Button className="w-full cursor-pointer" onClick={() => handleLogin()} disabled={isLoading}>
                             {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Login as Teacher"}
                         </Button>
 

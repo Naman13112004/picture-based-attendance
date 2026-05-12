@@ -124,7 +124,7 @@ const StudentProfile = () => {
                                 >
                                     {imgData ? (
                                         <>
-                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                            { }
                                             <Image src={imgData} alt={`Reference ${index + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
                                             <Button
                                                 variant="destructive"
