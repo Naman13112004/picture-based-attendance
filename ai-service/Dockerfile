@@ -31,6 +31,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     libgomp1 \
+    libopenblas0 \
+    liblapack3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the pre-built wheels from the builder stage
