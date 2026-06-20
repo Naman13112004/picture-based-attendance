@@ -8,3 +8,6 @@ env/
 Dockerfile
 .dockerignore
 .DS_Store
+
+models/
+

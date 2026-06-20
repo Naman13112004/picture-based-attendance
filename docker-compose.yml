@@ -60,7 +60,10 @@ services:
     image: snapattend-ai-service:latest
     ports:
       - "8000:8000"
+    volumes:
+      - ai-models:/app/models
     restart: unless-stopped
 
 volumes:
   pgdata:
+  ai-models:

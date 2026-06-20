@@ -14,14 +14,19 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import face_recognition
-import numpy as np
-import requests
-from io import BytesIO
-from typing import List
+
+from models import AttendanceRequest, Student
+from model_manager import initialize_models
+from config import MAX_WORKERS
+from pipeline.image_loader import load_image_from_url
+from pipeline.detector import detect_faces
+from pipeline.embedder import get_embeddings, get_single_embedding
+from pipeline.matcher import match_student
+from pipeline.preprocessor import enhance_image
 
 app = FastAPI()
 
@@ -33,53 +38,56 @@ app.add_middleware(
 )
 
 
-# --- Data Models (Schema) ---
-class Student(BaseModel):
-    id: str
-    image_paths: List[str]  # Now expects Full URLs: ["https://supa.../face1.jpg", ...]
+@app.on_event("startup")
+async def startup_event():
+    """Download and initialize face detection/recognition models on startup."""
+    print("Initializing face recognition pipeline...")
+    initialize_models()
+    print("Pipeline ready.")
 
 
-class AttendanceRequest(BaseModel):
-    class_image_path: str  # Now expects Full URL: "https://supa.../class_101.jpg"
-    students: List[Student]
-
-
-# --- Helper Function: Download Image ---
-def load_image_from_url(url: str):
+def _process_student(student: Student, class_embeddings: list) -> str | None:
     """
-    Downloads an image from a URL and converts it to a numpy array
-    usable by face_recognition.
-    """
-    try:
-        response = requests.get(url, timeout=10)  # 10s timeout
-        response.raise_for_status()  # Raise error for 404/500
+    Process a single student: download reference photos, detect faces,
+    extract embeddings, and check for a match against class embeddings.
 
-        # Load image from bytes
-        # face_recognition.load_image_file accepts a file-like object (BytesIO)
-        image = face_recognition.load_image_file(BytesIO(response.content))
-        return image
-    except Exception as e:
-        print(f"Failed to download or load image from {url}: {e}")
+    Returns the student ID if present, None otherwise.
+    """
+    student_known_embeddings = []
+
+    for img_url in student.image_paths:
+        if not img_url:
+            continue
+
+        # Download reference photo
+        ref_image = load_image_from_url(img_url)
+        if ref_image is None:
+            continue
+
+        # Preprocess the reference photo
+        ref_image = enhance_image(ref_image)
+
+        # Detect face(s) in reference photo
+        ref_faces = detect_faces(ref_image)
+        if ref_faces is None:
+            print(f"  No face found in reference photo for {student.id}: {img_url}")
+            continue
+
+        # Extract embedding from the first (primary) face in the reference
+        embedding = get_single_embedding(ref_image, ref_faces[0])
+        student_known_embeddings.append(embedding)
+
+    if not student_known_embeddings:
+        print(f"Skipping student {student.id}: No valid reference embeddings.")
         return None
 
+    # Match against class photo faces
+    if match_student(student_known_embeddings, class_embeddings):
+        print(f"Student {student.id}: PRESENT")
+        return student.id
 
-# --- Helper Function: Get Encodings ---
-def get_face_encodings(image_url: str):
-    """
-    Loads an image from URL and returns the 128-dimensional face encoding.
-    """
-    image = load_image_from_url(image_url)
-
-    if image is None:
-        return []
-
-    try:
-        # Get encodings
-        encodings = face_recognition.face_encodings(image)
-        return encodings
-    except Exception as e:
-        print(f"Error processing encodings for {image_url}: {e}")
-        return []
+    print(f"Student {student.id}: ABSENT")
+    return None
 
 
 # --- Main Endpoint ---
@@ -95,63 +103,41 @@ async def recognize_faces(data: AttendanceRequest):
             status_code=400, detail="Could not download class photo from URL"
         )
 
-    try:
-        # Find all face locations and encodings in the group photo
-        # model="hog" is faster (CPU), "cnn" is more accurate (GPU required)
-        class_face_locations = face_recognition.face_locations(class_image, model="hog")
-        class_face_encodings = face_recognition.face_encodings(
-            class_image, class_face_locations
-        )
+    # Preprocess the class photo
+    class_image = enhance_image(class_image)
 
-        print(f"Found {len(class_face_encodings)} faces in class photo.")
+    # 2. Detect all faces in the class photo
+    class_faces = detect_faces(class_image)
 
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error processing class photo: {str(e)}"
-        )
+    if class_faces is None:
+        print("No faces detected in class photo.")
+        return {
+            "total_faces_detected": 0,
+            "present_student_ids": [],
+            "absent_count": len(data.students),
+        }
 
+    # 3. Extract embeddings for all detected class faces
+    class_embeddings = get_embeddings(class_image, class_faces)
+    print(f"Found {len(class_embeddings)} faces in class photo.")
+
+    # 4. Process each student concurrently
     present_students = []
 
-    # 2. Iterate through each enrolled student
-    for student in data.students:
-        student_known_encodings = []
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(_process_student, student, class_embeddings): student
+            for student in data.students
+        }
 
-        # Load reference photos from URLs
-        for img_url in student.image_paths:
-            # Skip empty URLs if any
-            if not img_url:
-                continue
+        for future in futures:
+            result = future.result()
+            if result is not None:
+                present_students.append(result)
 
-            encs = get_face_encodings(img_url)
-            if encs:
-                student_known_encodings.extend(encs)
-
-        if not student_known_encodings:
-            print(
-                f"Skipping student {student.id}: No valid reference photos downloaded."
-            )
-            continue
-
-        # 3. Compare Student References vs All Class Faces
-        match_found = False
-        tolerance = 0.6
-
-        for known_encoding in student_known_encodings:
-            # Compare against all faces in the class
-            matches = face_recognition.compare_faces(
-                class_face_encodings, known_encoding, tolerance=tolerance
-            )
-
-            if True in matches:
-                match_found = True
-                break
-
-        if match_found:
-            present_students.append(student.id)
-
-    # Return the results
+    # Return the results (same format as before)
     return {
-        "total_faces_detected": len(class_face_encodings),
+        "total_faces_detected": len(class_embeddings),
         "present_student_ids": present_students,
         "absent_count": len(data.students) - len(present_students),
     }

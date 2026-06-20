@@ -37,7 +37,7 @@ To make the workflow succeed, you must add the following Repository Secrets in y
 - `DOCKERHUB_TOKEN`: A Personal Access Token generated from Docker Hub. (Go to Docker Hub > Account Settings > Security > New Access Token).
 
 **Workflow Features:**
-- Uses **Docker Buildx** with layer caching to drastically reduce the build time of the `ai-service` (dlib compilation).
+- Uses **Docker Buildx** with layer caching. Build times are extremely fast due to the lightweight OpenCV DNN architecture.
 - Tags images with `latest` and a specific Git SHA for easy rollbacks.
 
 ---
@@ -47,7 +47,7 @@ To make the workflow succeed, you must add the following Repository Secrets in y
 Render is a great platform to host this application. However, their free tier has strict RAM limits.
 
 ### Optimizations Included
-- **Multi-stage Builds**: The Next.js frontend uses `standalone` output mode (cutting size by 80%). The `ai-service` builds wheels in one stage and copies them to a lightweight python image, dropping all C++ build tools and source code.
+- **Multi-stage Builds**: The Next.js frontend uses `standalone` output mode (cutting size by 80%). The `ai-service` uses a lightweight `python:3.10-slim` base image since there are no C++ build tools required.
 - **Node CI**: We omit `devDependencies` during production builds.
 
 ### Render Deployment Steps
@@ -69,12 +69,12 @@ Render is a great platform to host this application. However, their free tier ha
    - `NEXT_PUBLIC_BACKEND_API_URL` (Set to your Render backend URL)
 
 #### AI Service (Web Service)
-*The AI Service uses the heavy `face_recognition` library. Deploying this effectively requires specific tuning.*
+*The AI Service uses lightweight OpenCV DNN models (YuNet and SFace).*
 1. Create a New Web Service using `your_docker_username/snapattend-ai-service:latest`.
 2. **Cold Starts**: Render spins down free tier instances after 15 minutes of inactivity. When it wakes up, it has to load the ML models into RAM. **Recommendation**: Either upgrade to a paid "Starter" tier ($7/mo) for the AI Service to prevent cold starts, or use a cron job (like UptimeRobot) to ping the `/` health check endpoint every 10 minutes.
-3. **RAM Limits**: `face_recognition` can spike RAM usage above the 512MB free tier limit if many images are processed concurrently. The Docker image uses `python:3.10-slim` to leave as much RAM as possible for the actual model execution.
+3. **RAM Limits**: The OpenCV DNN models (YuNet and SFace) use approximately 150-200MB of RAM in total, comfortably fitting within the 512MB free tier limit. The Docker image uses `python:3.10-slim` to minimize the OS footprint.
 
 ### General Troubleshooting
 
 - **Database Issues**: If the backend fails to start, ensure the `DATABASE_URL` is correct and PostgreSQL is running.
-- **AI Build Fails on GitHub**: If the GitHub Action fails or takes too long, ensure layer caching is working. The first build takes ~5-10 minutes, subsequent builds take <1 minute.
+- **AI Build Fails on GitHub**: The build should take less than 1 minute as there are no heavy C++ dependencies to compile. Ensure your requirements.txt is correctly formatted.

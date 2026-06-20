@@ -18,7 +18,7 @@ Traditional attendance systemsâ€”like roll calls, RFID cards, or sign-in sheetsâ
 ## âœ¨ Features
 
 - **Automated Facial Recognition**: Upload a single group photo to mark attendance for everyone present.
-- **High Accuracy & Fast Processing**: Powered by Python's `face_recognition` library and FastAPI.
+- **High Accuracy & Fast Processing**: Powered by lightweight OpenCV DNN models (YuNet and SFace) and FastAPI.
 - **Secure Biometric Handling**: Encodings are generated efficiently without storing raw PII data loosely.
 - **Modern Web Dashboard**: A Next.js based frontend for teachers and admins to view and manage attendance.
 - **Role-Based Access**: Manage classes, students, and generate attendance reports easily.
@@ -30,7 +30,7 @@ Traditional attendance systemsâ€”like roll calls, RFID cards, or sign-in sheetsâ
 
 - **Frontend**: Next.js (React), Tailwind CSS, Zustand
 - **Backend API**: Node.js, Express, Prisma ORM, PostgreSQL
-- **AI Service**: Python, FastAPI, `face_recognition`, OpenCV
+- **AI Service**: Python, FastAPI, OpenCV DNN (YuNet, SFace)
 - **Storage/Auth**: Supabase (PostgreSQL + Buckets)
 
 ---
@@ -89,7 +89,7 @@ We have provided a unified script to install dependencies across all three servi
 - Node.js (v18+)
 - Python (v3.10+)
 - PostgreSQL (or a Neon/Supabase DB URL)
-- C/C++ Compiler (for `dlib` / `face_recognition` python bindings)
+
 
 ### Step 1: Clone the Repository
 ```bash
@@ -135,17 +135,7 @@ We are actively looking for contributors to help scale this project! Here are so
 - **Dashboard Improvements**: Add data visualization for attendance trends over the semester.
 - **API Exposure**: Document and expose public API routes with API keys for developers to build third-party mobile apps.
 - **Edge AI**: Help migrate the AI model to run inference closer to the edge for lower latency.
-- **AI Deployment Optimization (High Impact)**:
-  Deploying the FastAPI-based face recognition service efficiently and cost-effectively is a major challenge due to heavy dependencies like dlib and CPU-intensive inference.
 
-  We are looking for contributors to:
-  - Optimize model inference speed and memory usage
-  - Reduce dependency footprint (lightweight alternatives to dlib)
-  - Explore GPU vs CPU trade-offs for low-cost environments
-  - Enable deployment on free/low-tier platforms (e.g., serverless, edge, or container-based solutions)
-  - Implement batching or async processing for scalability
-
-  If you have experience with ML optimization, Docker, or edge deployment, this is a high-impact area to contribute.
 
 See the [CONTRIBUTING.md](./CONTRIBUTING.md) to get started!
 
