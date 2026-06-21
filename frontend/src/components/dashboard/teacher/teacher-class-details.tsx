@@ -170,9 +170,9 @@ const TeacherClassDetails = () => {
                             </Label>
                         </div>
                     ) : (
-                        <div className="relative rounded-lg overflow-hidden border">
+                        <div className="relative rounded-lg overflow-hidden border w-full h-full">
                             { }
-                            <Image src={previewUrl} alt="Class Preview" className="w-full h-auto object-cover max-h-100" />
+                            <Image src={previewUrl} alt="Class Preview" className="object-cover" fill />
                             {status === 'idle' && (
                                 <Button variant="secondary" size="sm" className="absolute top-2 right-2 cursor-pointer" onClick={() => { setPreviewUrl(null); setFile(null) }}>Change Photo</Button>
                             )}

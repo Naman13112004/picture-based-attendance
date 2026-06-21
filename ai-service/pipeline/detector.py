@@ -21,22 +21,23 @@ from model_manager import get_detector
 from config import MAX_IMAGE_DIMENSION
 
 
-def _clamp_image_size(image: np.ndarray) -> np.ndarray:
+def _clamp_image_size(image: np.ndarray) -> tuple[np.ndarray, float]:
     """
     Downscale image if either dimension exceeds MAX_IMAGE_DIMENSION,
     preserving aspect ratio. Large images slow detection without
     improving accuracy beyond a point.
+    Returns the (image, scale_factor).
     """
     h, w = image.shape[:2]
     max_dim = max(h, w)
 
     if max_dim <= MAX_IMAGE_DIMENSION:
-        return image
+        return image, 1.0
 
     scale = MAX_IMAGE_DIMENSION / max_dim
     new_w = int(w * scale)
     new_h = int(h * scale)
-    return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA), scale
 
 
 def detect_faces(image: np.ndarray) -> np.ndarray | None:
@@ -59,18 +60,23 @@ def detect_faces(image: np.ndarray) -> np.ndarray | None:
         Returns None if no faces are detected.
     """
     # Clamp large images to prevent excessive memory usage
-    image = _clamp_image_size(image)
+    clamped_image, scale = _clamp_image_size(image)
 
     detector = get_detector()
 
     # Set detector input size to match this specific image
-    h, w = image.shape[:2]
+    h, w = clamped_image.shape[:2]
     detector.setInputSize((w, h))
 
     # Run detection
-    retval, faces = detector.detect(image)
+    retval, faces = detector.detect(clamped_image)
 
     if faces is None or len(faces) == 0:
         return None
+
+    # If the image was downscaled, scale the coordinates back to original image size
+    # Columns 0-13 are spatial coordinates (x,y,w,h, and 5 landmarks). Column 14 is confidence.
+    if scale != 1.0:
+        faces[:, :14] = faces[:, :14] / scale
 
     return faces

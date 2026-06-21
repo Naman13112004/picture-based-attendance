@@ -10,4 +10,13 @@ export default withPWA({
 })({
   reactCompiler: true,
   output: "standalone",
+
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "gylurnwyaslhheataqkt.supabase.co",
+      },
+    ],
+  },
 });

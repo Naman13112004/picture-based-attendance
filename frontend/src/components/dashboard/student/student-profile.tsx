@@ -6,13 +6,13 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { CameraModal } from "@/components/modals/camera-modal";
 import { PlusCircle, Trash2, UserSquare2 } from "lucide-react";
-import { 
-    Card, 
+import {
+    Card,
     CardContent,
-    CardDescription, 
-    CardFooter, 
-    CardHeader, 
-    CardTitle 
+    CardDescription,
+    CardFooter,
+    CardHeader,
+    CardTitle
 } from "@/components/ui/card";
 import Image from "next/image";
 
@@ -125,7 +125,7 @@ const StudentProfile = () => {
                                     {imgData ? (
                                         <>
                                             { }
-                                            <Image src={imgData} alt={`Reference ${index + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
+                                            <Image src={imgData} alt={`Reference ${index + 1}`} className="object-cover" crossOrigin="anonymous" fill />
                                             <Button
                                                 variant="destructive"
                                                 size="icon"
