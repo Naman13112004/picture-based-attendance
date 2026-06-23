@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation"; // Added useRouter
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { 
@@ -11,8 +11,7 @@ import {
   Settings, 
   LogOut, 
   BookOpen,
-  ChevronLeft,
-  Menu
+  ChevronLeft
 } from "lucide-react";
 
 import { useAuth } from "@/store/useAuth";
@@ -24,10 +23,9 @@ interface SidebarProps {
 
 export function Sidebar({ role }: SidebarProps) {
   const pathname = usePathname();
-  const router = useRouter(); // Initialize router
+  const router = useRouter();
 
   const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
 
   const { clearAuth } = useAuth();
 
@@ -36,7 +34,6 @@ export function Sidebar({ role }: SidebarProps) {
     router.replace("/");
   };
 
-  // Define routes based on role
   const routes = role === "teacher" 
     ? [
         { label: "Dashboard", href: "/dashboard/teacher", icon: LayoutDashboard },
@@ -50,81 +47,55 @@ export function Sidebar({ role }: SidebarProps) {
       ];
 
   return (
-    <>
-      {/* Mobile Toggle */}
-      <Button
-        variant="outline"
-        size="icon"
-        className="md:hidden fixed bottom-5 left-4 bg-black"
-        onClick={() => setMobileOpen(true)}
-      >
-        <Menu />
-      </Button>
-
-      {/* Overlay */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 bg-black/40 z-40 md:hidden"
-          onClick={() => setMobileOpen(false)}
-        />
+    <aside
+      className={cn(
+        "hidden md:flex flex-col z-50 h-[calc(100vh-4rem)] bg-card border-r transition-all sticky top-16",
+        collapsed ? "w-16" : "w-64"
       )}
-
-      {/* Sidebar */}
-      <aside
-        className={cn(
-          "fixed md:static z-50 h-full bg-card border-r transition-all",
-          collapsed ? "w-16" : "w-64",
-          mobileOpen ? "left-0" : "-left-full",
-          "md:left-0"
+    >
+      <div className="flex items-center justify-between p-4">
+        {!collapsed && (
+          <h2 className="font-bold text-primary">
+            {role === "teacher" ? "Teacher Panel" : "Student View"}
+          </h2>
         )}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4">
-          {!collapsed && (
-            <h2 className="font-bold text-primary">
-              {role === "teacher" ? "Teacher Panel" : "Student View"}
-            </h2>
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setCollapsed(!collapsed)}
-            className="hidden md:flex cursor-pointer"
-          >
-            <ChevronLeft className={cn("transition", collapsed && "rotate-180")} />
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setCollapsed(!collapsed)}
+          className="cursor-pointer"
+        >
+          <ChevronLeft className={cn("transition", collapsed && "rotate-180")} />
+        </Button>
+      </div>
 
-        {/* Routes */}
-        <div className="px-2 space-y-1">
-          {routes.map((route) => (
-            <Link key={route.href} href={route.href}>
-              <Button
-                variant={pathname === route.href ? "secondary" : "ghost"}
-                className={cn(
-                  "w-full justify-start gap-2 cursor-pointer",
-                  collapsed && "justify-center"
-                )}
-              >
-                <route.icon className="h-4 w-4" />
-                {!collapsed && route.label}
-              </Button>
-            </Link>
-          ))}
-        </div>
+      <div className="px-2 space-y-1 flex-1 overflow-y-auto">
+        {routes.map((route) => (
+          <Link key={route.href} href={route.href}>
+            <Button
+              variant={pathname === route.href ? "secondary" : "ghost"}
+              className={cn(
+                "w-full justify-start gap-2 cursor-pointer",
+                collapsed && "justify-center"
+              )}
+            >
+              <route.icon className="h-4 w-4" />
+              {!collapsed && route.label}
+            </Button>
+          </Link>
+        ))}
+      </div>
 
-        {/* Logout */}
-        <div className="p-4 border-t">
-          <Button
-            variant="outline"
-            className="w-full gap-2 text-destructive cursor-pointer"
-            onClick={handleLogout}
-          >
-            <LogOut className="h-4 w-4" />
-            {!collapsed && "Sign Out"}
-          </Button>
-        </div>
-      </aside>
-    </>
+      <div className="p-4 border-t">
+        <Button
+          variant="outline"
+          className="w-full gap-2 text-destructive cursor-pointer"
+          onClick={handleLogout}
+        >
+          <LogOut className="h-4 w-4" />
+          {!collapsed && "Sign Out"}
+        </Button>
+      </div>
+    </aside>
   );
 }
