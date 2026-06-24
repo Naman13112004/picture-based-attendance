@@ -9,10 +9,10 @@ import api from "@/lib/api";
 import { ClassroomModal } from "@/components/modals/classroom-modal";
 
 interface Classroom {
-  id: string;
-  name: string;
-  code: string;
-  _count: { students: number };
+    id: string;
+    name: string;
+    code: string;
+    _count: { students: number };
 }
 
 const TeacherDashboardComponent = () => {
@@ -56,12 +56,12 @@ const TeacherDashboardComponent = () => {
                 title={"Create New Classroom"}
             />
 
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
                     <p className="text-muted-foreground">Manage your classes and today&apos;s attendance.</p>
                 </div>
-                <Button className="gap-2 cursor-pointer" onClick={openCreateModal}>
+                <Button className="gap-2 cursor-pointer w-full sm:w-auto" onClick={openCreateModal}>
                     <Plus className="h-4 w-4" /> Create New Class
                 </Button>
             </div>

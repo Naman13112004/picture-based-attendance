@@ -16,7 +16,7 @@ export default function Navbar() {
   const router = useRouter();
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  // const [mounted, setMounted] = useState(false);
 
   const { token, role, hasHydrated, hydrate, clearAuth } = useAuth();
   const isLoggedIn = !!token;
@@ -26,7 +26,7 @@ export default function Navbar() {
   };
 
   useEffect(() => {
-    setMounted(true);
+    // setMounted(true);
     hydrate();
   }, [hydrate]);
 
@@ -43,7 +43,8 @@ export default function Navbar() {
 
   const isDashboard = pathname?.startsWith("/dashboard");
 
-  if (!mounted || !hasHydrated) return null;
+  // if (!mounted || !hasHydrated) return null;
+  if (!hasHydrated) return null;
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
@@ -60,7 +61,9 @@ export default function Navbar() {
           </Link>
           <div className="flex items-center space-x-2">
             <Button variant="ghost" size="icon" onClick={toggleTheme} className="cursor-pointer">
-              {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+              {/* {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />} */}
+              <Sun className="h-5 w-5 hidden dark:block" />
+              <Moon className="h-5 w-5 dark:hidden" />
             </Button>
 
             {!isDashboard && (

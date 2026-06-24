@@ -114,12 +114,12 @@ const TeacherClasses = () => {
                 title={editingClass ? "Edit Classroom" : "Create New Classroom"}
             />
 
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight">Manage Classes</h2>
                     <p className="text-muted-foreground">View and manage all your active classrooms.</p>
                 </div>
-                <Button className="gap-2 cursor-pointer" onClick={openCreateModal}>
+                <Button className="gap-2 cursor-pointer w-full sm:w-auto" onClick={openCreateModal}>
                     <Plus className="h-4 w-4" /> Create New Class
                 </Button>
             </div>
