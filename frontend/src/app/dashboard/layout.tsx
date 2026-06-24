@@ -1,7 +1,9 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
+import { useAuth } from "@/store/useAuth";
 
 export default function DashboardLayout({
   children,
@@ -9,10 +11,22 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { token, hasHydrated } = useAuth();
+  
   // Simple check to determine role based on URL for MVP
-  // In production, this comes from the Session/Auth Context
   const isTeacher = pathname.includes("/teacher");
   const role = isTeacher ? "teacher" : "student";
+
+  useEffect(() => {
+    if (hasHydrated && !token) {
+      router.replace("/login");
+    }
+  }, [hasHydrated, token, router]);
+
+  if (!hasHydrated || !token) {
+    return null; // Don't render anything while checking auth
+  }
 
   return (
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden">

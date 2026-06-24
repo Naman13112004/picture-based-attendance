@@ -14,6 +14,14 @@ import {
     CardHeader,
     CardTitle
 } from "@/components/ui/card";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 import Image from "next/image";
 
 const StudentProfile = () => {
@@ -24,6 +32,7 @@ const StudentProfile = () => {
     const [isCameraOpen, setIsCameraOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isLoadingData, setIsLoadingData] = useState(true);
+    const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
 
     // 1. Fetch Existing Profile on Mount
     useEffect(() => {
@@ -149,7 +158,7 @@ const StudentProfile = () => {
                 </CardContent>
                 <CardFooter className="flex justify-end border-t pt-6">
                     <Button
-                        onClick={handleSaveProfile}
+                        onClick={() => setIsConsentModalOpen(true)}
                         disabled={isSaving || images.some(img => img === null)}
                         className="w-full md:w-auto gap-2 cursor-pointer"
                     >
@@ -165,6 +174,29 @@ const StudentProfile = () => {
                 onClose={() => setIsCameraOpen(false)}
                 onCapture={handleImageCaptured}
             />
+
+            {/* Consent Modal */}
+            <Dialog open={isConsentModalOpen} onOpenChange={setIsConsentModalOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Consent to Store Photos</DialogTitle>
+                        <DialogDescription>
+                            By proceeding, you consent to store these 3 photos in our database for the purpose of facial recognition attendance. These photos will be kept securely until you update them, at which point the previous photos will be permanently deleted. Do you agree to these terms?
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsConsentModalOpen(false)} className="cursor-pointer">
+                            Cancel
+                        </Button>
+                        <Button onClick={() => {
+                            setIsConsentModalOpen(false);
+                            handleSaveProfile();
+                        }} className="cursor-pointer">
+                            I Agree & Save
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 };

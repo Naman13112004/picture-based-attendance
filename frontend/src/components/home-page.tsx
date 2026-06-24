@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/store/useAuth";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import Link from "next/link";
@@ -7,11 +10,26 @@ import {
     ArrowRight,
     CheckCircle2,
     Users,
-    ScanFace
+    ScanFace,
+    LayoutDashboard
 } from "lucide-react";
 import InstallAppButton from "./install-app";
 
 const HomePage = () => {
+    const { token, role, hasHydrated } = useAuth();
+    const router = useRouter();
+    const isLoggedIn = !!token;
+
+    useEffect(() => {
+        if (hasHydrated && isLoggedIn) {
+            if (role === "TEACHER") {
+                router.replace("/dashboard/teacher");
+            } else {
+                router.replace("/dashboard/student");
+            }
+        }
+    }, [hasHydrated, isLoggedIn, role, router]);
+
     // Animation variants for staggered reveal
     const containerVariants = {
         hidden: { opacity: 0 },
@@ -54,16 +72,26 @@ const HomePage = () => {
                     </motion.div>
                     <motion.div variants={itemVariants} className="mt-8 flex flex-col justify-center gap-4">
                         <div className="flex justify-center gap-4">
-                            <Button asChild size="lg" className="gap-2 cursor-pointer">
-                                <Link href="/login?role=teacher">
-                                    Teacher Login <ArrowRight className="h-4 w-4" />
-                                </Link>
-                            </Button>
-                            <Button asChild size="lg" variant="outline" className="gap-2 cursor-pointer">
-                                <Link href="/login?role=student">
-                                    Student Portal
-                                </Link>
-                            </Button>
+                            {hasHydrated && isLoggedIn ? (
+                                <Button asChild size="lg" className="gap-2 cursor-pointer">
+                                    <Link href={role === "TEACHER" ? "/dashboard/teacher" : "/dashboard/student"}>
+                                        <LayoutDashboard className="h-4 w-4" /> Go to Dashboard
+                                    </Link>
+                                </Button>
+                            ) : (
+                                <>
+                                    <Button asChild size="lg" className="gap-2 cursor-pointer">
+                                        <Link href="/login?role=teacher">
+                                            Teacher Login <ArrowRight className="h-4 w-4" />
+                                        </Link>
+                                    </Button>
+                                    <Button asChild size="lg" variant="outline" className="gap-2 cursor-pointer">
+                                        <Link href="/login?role=student">
+                                            Student Portal
+                                        </Link>
+                                    </Button>
+                                </>
+                            )}
                         </div>
                         <InstallAppButton />
                     </motion.div>
