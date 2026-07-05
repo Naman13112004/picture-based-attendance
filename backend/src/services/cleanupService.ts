@@ -1,58 +1,94 @@
+// src/services/cleanupService.ts
+// Daily scheduled job — repurposed from class-photo cleanup to database
+// integrity verification now that class photos are no longer stored on disk
+// or in any cloud storage bucket.
+
 import cron from 'node-cron';
-import { supabase } from '../config/supabase.js';
+import { Prisma } from '@prisma/client';
+import db from '../config/db.js';
 
-const BUCKET_NAME = process.env.SUPABASE_BUCKET || 'snapattend-uploads';
-const FOLDER = 'class_photos';
-
-// Run every day at midnight (00:00)
+/**
+ * Start the daily database integrity check.
+ *
+ * Runs every day at midnight (00:00 server time).
+ *
+ * Checks performed:
+ *  1. Students with null faceEmbedding — these students cannot be recognized
+ *     in attendance and should be prompted to re-upload their photos.
+ *  2. Total attendance record count — useful for observability.
+ *  3. Classrooms with no enrolled students — potential orphaned classes.
+ *
+ * All findings are logged to stdout. In a production environment these logs
+ * should be piped to a structured logging service (Datadog, Loki, etc.)
+ * or an alerting webhook.
+ */
 export const startCleanupJob = () => {
-    cron.schedule('0 0 * * *', async () => {
-        console.log('🧹 Running daily cleanup job for old class photos...');
-        
-        try {
-            // 1. List all files in the class_photos folder
-            const { data: files, error } = await supabase
-                .storage
-                .from(BUCKET_NAME)
-                .list(FOLDER, { limit: 1000 }); // Adjust limit as needed
+  cron.schedule('0 0 * * *', async () => {
+    console.log('🔍 [Integrity Check] Running daily database integrity check...');
 
-            if (error) {
-                console.error('Error listing files for cleanup:', error);
-                return;
-            }
+    try {
+      // ── Check 1: Students with no face embeddings ──────────────────────────
+      // Prisma's JSON nullable filter: { equals: Prisma.AnyNull } matches rows
+      // where faceEmbedding IS NULL (SQL null, not JSON null).
+      const profilesWithoutEmbeddings = await db.studentProfile.findMany({
+        where: {
+          faceEmbedding: {
+            equals: Prisma.AnyNull,
+          },
+        },
+        include: {
+          user: {
+            select: { name: true, email: true },
+          },
+        },
+      });
 
-            if (!files || files.length === 0) return;
-
-            // 2. Identify files older than 24 hours
-            const now = new Date();
-            const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
-            const filesToDelete = files
-                .filter(file => {
-                    const created = new Date(file.created_at); // Supabase returns created_at
-                    return created < oneDayAgo;
-                })
-                .map(file => `${FOLDER}/${file.name}`); // Construct full path
-
-            if (filesToDelete.length === 0) {
-                console.log('No old files to delete.');
-                return;
-            }
-
-            // 3. Delete them
-            const { error: deleteError } = await supabase
-                .storage
-                .from(BUCKET_NAME)
-                .remove(filesToDelete);
-
-            if (deleteError) {
-                console.error('Error deleting old files:', deleteError);
-            } else {
-                console.log(`✅ Successfully deleted ${filesToDelete.length} old class photos.`);
-            }
-
-        } catch (err) {
-            console.error('Cleanup job failed:', err);
+      if (profilesWithoutEmbeddings.length === 0) {
+        console.log(
+          '✅ [Integrity Check] All registered students have face embeddings.',
+        );
+      } else {
+        console.warn(
+          `⚠️  [Integrity Check] ${profilesWithoutEmbeddings.length} student(s) ` +
+          'have no face embeddings and cannot be recognized in attendance:',
+        );
+        for (const profile of profilesWithoutEmbeddings) {
+          console.warn(
+            `   - ${profile.user.name} <${profile.user.email}> (userId: ${profile.userId})`,
+          );
         }
-    });
+        console.warn(
+          '   → Ask these students to re-upload their face photos via Settings.',
+        );
+      }
+
+      // ── Check 2: Total attendance record count ────────────────────────────
+      const attendanceCount = await db.attendance.count();
+      console.log(
+        `📊 [Integrity Check] Total attendance records in DB: ${attendanceCount.toLocaleString()}`,
+      );
+
+      // ── Check 3: Classrooms with no enrolled students ─────────────────────
+      const emptyClassrooms = await db.classroom.findMany({
+        where: { students: { none: {} } },
+        select: { id: true, name: true, code: true },
+      });
+
+      if (emptyClassrooms.length > 0) {
+        console.warn(
+          `⚠️  [Integrity Check] ${emptyClassrooms.length} classroom(s) have no enrolled students:`,
+        );
+        for (const cls of emptyClassrooms) {
+          console.warn(`   - "${cls.name}" (code: ${cls.code}, id: ${cls.id})`);
+        }
+      }
+
+      console.log('✅ [Integrity Check] Daily integrity check completed.');
+
+    } catch (err) {
+      console.error('❌ [Integrity Check] Daily integrity check failed:', err);
+    }
+  });
+
+  console.log('⏰ Daily database integrity check scheduled (runs at 00:00).');
 };

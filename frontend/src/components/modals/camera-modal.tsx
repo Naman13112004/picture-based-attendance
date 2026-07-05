@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Camera, RotateCcw, Check } from "lucide-react";
-import Image from "next/image";
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -37,15 +36,15 @@ export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
     return () => {
       stopCamera();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
 
   const startCamera = async () => {
     setError("");
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: "user", width: 640, height: 480 } 
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: 640, height: 480 }
       });
       setStream(mediaStream);
       if (videoRef.current) {
@@ -74,10 +73,10 @@ export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
         // Set canvas dimensions to match video stream
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        
+
         // Draw current video frame to canvas
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
+
         // Convert canvas data to base64 image url
         const imageDataUrl = canvas.toDataURL("image/jpeg");
         setCapturedImage(imageDataUrl);
@@ -99,9 +98,9 @@ export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
   };
 
   const handleClose = () => {
-      setCapturedImage(null);
-      stopCamera();
-      onClose();
+    setCapturedImage(null);
+    stopCamera();
+    onClose();
   }
 
   return (
@@ -113,10 +112,10 @@ export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
             Ensure your face is clearly visible and well-lit.
           </DialogDescription>
         </DialogHeader>
-        
+
         <div className="flex flex-col items-center justify-center space-y-4 p-4 border-2 border-dashed rounded-lg bg-muted/50 relative min-h-75">
           {error && <p className="text-destructive text-sm">{error}</p>}
-          
+
           {/* Hidden Canvas for capture logic */}
           <canvas ref={canvasRef} className="hidden" />
 
@@ -132,11 +131,11 @@ export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
             />
           ) : (
             // Captured Image Preview
-             
-            <Image 
-                src={capturedImage} 
-                alt="Captured" 
-                className="rounded-lg w-full h-auto max-h-100 object-cover transform scale-x-[-1]" 
+
+            <img
+              src={capturedImage}
+              alt="Captured"
+              className="rounded-lg w-full h-auto max-h-100 object-cover transform scale-x-[-1]"
             />
           )}
         </div>
@@ -148,12 +147,12 @@ export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
             </Button>
           ) : (
             <div className="flex gap-2 w-full justify-end">
-                <Button variant="outline" onClick={handleRetake} className="cursor-pointer">
-                    <RotateCcw className="mr-2 h-4 w-4" /> Retake
-                </Button>
-                <Button onClick={handleConfirm} className="cursor-pointer">
-                    <Check className="mr-2 h-4 w-4" /> Confirm
-                </Button>
+              <Button variant="outline" onClick={handleRetake} className="cursor-pointer">
+                <RotateCcw className="mr-2 h-4 w-4" /> Retake
+              </Button>
+              <Button onClick={handleConfirm} className="cursor-pointer">
+                <Check className="mr-2 h-4 w-4" /> Confirm
+              </Button>
             </div>
           )}
         </DialogFooter>

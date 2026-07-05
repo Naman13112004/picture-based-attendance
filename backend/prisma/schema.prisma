@@ -33,13 +33,17 @@ model Classroom {
 }
 
 model StudentProfile {
-  id         String      @id @default(uuid())
-  userId     String      @unique
-  faceData1  String?
-  faceData2  String?
-  faceData3  String?
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  classrooms Classroom[] @relation("ClassroomToStudentProfile")
+  id            String      @id @default(uuid())
+  userId        String      @unique
+  faceData1     String?
+  faceData2     String?
+  faceData3     String?
+  /// Pre-computed SFace embeddings. Stored as number[][] — up to 3 normalized
+  /// 128-dimensional vectors, one per reference image. Populated on face upload.
+  /// Null means the student has no registered embedding and cannot be recognized.
+  faceEmbedding Json?
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  classrooms    Classroom[] @relation("ClassroomToStudentProfile")
 }
 
 model Attendance {
