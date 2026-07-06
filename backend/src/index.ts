@@ -23,6 +23,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import morgan from 'morgan';
 import { fileURLToPath } from 'url';
+import cron from 'node-cron';
+import axios from 'axios';
 import { startCleanupJob } from './services/cleanupService.js';
 
 import authRoutes from './routes/authRoutes.js';
@@ -34,6 +36,17 @@ dotenv.config();
 
 // Start the cron job
 startCleanupJob();
+
+// Health Check Cron Job (every 5 minutes)
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    const aiBaseUrl = process.env.PYTHON_API_BASE_URL || 'http://127.0.0.1:8000';
+    await axios.get(`${aiBaseUrl}/`);
+    console.log('[Cron] AI Service health check passed.');
+  } catch (error) {
+    console.error('[Cron] AI Service health check failed:', (error as Error).message);
+  }
+});
 
 const app = express();
 const PORT = process.env.PORT || 5000;
