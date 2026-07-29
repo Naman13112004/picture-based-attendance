@@ -62,6 +62,7 @@ app.add_middleware(
 # Lifecycle
 # ---------------------------------------------------------------------------
 
+
 @app.on_event("startup")
 async def startup_event() -> None:
     """Download and initialize face detection/recognition models on startup."""
@@ -74,6 +75,7 @@ async def startup_event() -> None:
 # Health check
 # ---------------------------------------------------------------------------
 
+
 @app.get("/", tags=["health"])
 def read_root() -> dict:
     """Basic liveness check."""
@@ -83,6 +85,7 @@ def read_root() -> dict:
 # ---------------------------------------------------------------------------
 # Registration endpoint — called once per student face upload
 # ---------------------------------------------------------------------------
+
 
 @app.post("/register-face", response_model=RegisterFaceResponse, tags=["registration"])
 async def register_face(data: RegisterFaceRequest) -> RegisterFaceResponse:
@@ -161,8 +164,7 @@ async def register_face(data: RegisterFaceRequest) -> RegisterFaceResponse:
     embedding: list[float] = embedding_array.flatten().tolist()
 
     logger.info(
-        "register-face: embedding extracted successfully for student_id=%s "
-        "(dim=%d)",
+        "register-face: embedding extracted successfully for student_id=%s " "(dim=%d)",
         data.student_id,
         len(embedding),
     )
@@ -173,6 +175,7 @@ async def register_face(data: RegisterFaceRequest) -> RegisterFaceResponse:
 # ---------------------------------------------------------------------------
 # Recognition endpoint — hot path for every attendance session
 # ---------------------------------------------------------------------------
+
 
 @app.post("/recognize", response_model=RecognitionResponse, tags=["attendance"])
 async def recognize_faces(data: AttendanceRequest) -> RecognitionResponse:

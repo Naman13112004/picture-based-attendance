@@ -17,10 +17,10 @@
 from pydantic import BaseModel, field_validator
 from typing import List
 
-
 # ---------------------------------------------------------------------------
 # Registration models
 # ---------------------------------------------------------------------------
+
 
 class RegisterFaceRequest(BaseModel):
     """
@@ -29,6 +29,7 @@ class RegisterFaceRequest(BaseModel):
     Accepts a Base64-encoded image (with or without the data URI prefix,
     e.g. 'data:image/jpeg;base64,...') and the student's unique ID.
     """
+
     image_b64: str
     student_id: str
 
@@ -54,6 +55,7 @@ class RegisterFaceResponse(BaseModel):
     Returns the L2-normalized 128-D SFace embedding as a flat float list.
     The Node.js backend persists this in PostgreSQL as a JSON array.
     """
+
     student_id: str
     embedding: List[float]
 
@@ -61,6 +63,7 @@ class RegisterFaceResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Attendance recognition models
 # ---------------------------------------------------------------------------
+
 
 class StudentEmbeddings(BaseModel):
     """
@@ -73,6 +76,7 @@ class StudentEmbeddings(BaseModel):
     embeddings: List of up to 3 pre-computed L2-normalized 128-D SFace
                 vectors, one per reference photo registered by the student.
     """
+
     id: str
     embeddings: List[List[float]]
 
@@ -83,7 +87,9 @@ class StudentEmbeddings(BaseModel):
             raise ValueError("embeddings list must contain at least one vector")
         for vec in v:
             if len(vec) != 128:
-                raise ValueError(f"Each embedding must be 128-dimensional, got {len(vec)}")
+                raise ValueError(
+                    f"Each embedding must be 128-dimensional, got {len(vec)}"
+                )
         return v
 
 
@@ -96,6 +102,7 @@ class AttendanceRequest(BaseModel):
     students:        List of enrolled students with their pre-computed
                      embeddings. No per-student downloads or inference.
     """
+
     class_image_b64: str
     students: List[StudentEmbeddings]
 
@@ -109,6 +116,7 @@ class AttendanceRequest(BaseModel):
 
 class RecognitionResponse(BaseModel):
     """Response payload from POST /recognize."""
+
     total_faces_detected: int
     present_student_ids: List[str]
     absent_count: int
