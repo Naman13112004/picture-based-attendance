@@ -42,7 +42,7 @@ interface StudentRecord {
 const TeacherClassDetails = () => {
     const params = useParams();
     const classId = params.id as string;
-
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format for max date
     // --- Upload & Process State ---
     // Processing states: 'idle' | 'uploading' | 'processing' | 'complete' | 'error'
     const [file, setFile] = useState<File | null>(null);
@@ -270,6 +270,7 @@ const TeacherClassDetails = () => {
                                     type="date"
                                     className="pl-9 w-full sm:w-45 cursor-pointer"
                                     value={selectedDate}
+                                    max={today}
                                     onChange={(e) => setSelectedDate(e.target.value)}
                                 />
                             </div>
