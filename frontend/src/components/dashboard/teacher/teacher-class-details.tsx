@@ -42,7 +42,15 @@ interface StudentRecord {
 const TeacherClassDetails = () => {
     const params = useParams();
     const classId = params.id as string;
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format for max date
+    
+    //this will get the user's Local System date and behave accordingly
+    const formatLocalDate = (date: Date) => {
+            const offset = date.getTimezoneOffset();
+            const local = new Date(date.getTime() - offset * 60_000);
+            return local.toISOString().split("T")[0];
+    };
+
+    const today = formatLocalDate(new Date());
     // --- Upload & Process State ---
     // Processing states: 'idle' | 'uploading' | 'processing' | 'complete' | 'error'
     const [file, setFile] = useState<File | null>(null);
@@ -51,7 +59,7 @@ const TeacherClassDetails = () => {
     const [attendanceResults, setAttendanceResults] = useState<{ present: number, absent: number } | null>(null);
 
     // --- History & Records State ---
-    const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]); // Default to today YYYY-MM-DD
+    const [selectedDate, setSelectedDate] = useState<string>(formatLocalDate(new Date())); // Default to today YYYY-MM-DD
     const [historyLoading, setHistoryLoading] = useState(false);
     const [studentRecords, setStudentRecords] = useState<StudentRecord[]>([]);
     const [stats, setStats] = useState({ total: 0, present: 0 });
