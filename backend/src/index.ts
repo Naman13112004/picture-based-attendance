@@ -21,6 +21,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import morgan from 'morgan';
+import { fileURLToPath } from 'url';
 import cron from 'node-cron';
 import axios from 'axios';
 import { startCleanupJob } from './services/cleanupService.js';
