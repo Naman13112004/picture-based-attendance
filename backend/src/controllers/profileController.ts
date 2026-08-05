@@ -10,10 +10,6 @@ import { registerFace } from '../services/aiService.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Safely cast a Prisma JsonValue to number[][] after runtime validation.
- * Returns null if the value is absent, not an array, or structurally invalid.
- */
 function parseFaceEmbedding(raw: unknown): number[][] | null {
   if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
   const valid = (raw as unknown[]).every(
@@ -25,6 +21,50 @@ function parseFaceEmbedding(raw: unknown): number[][] | null {
   return valid ? (raw as number[][]) : null;
 }
 
+/**
+ * Compute the mean of a list of 128-D float vectors, then L2-normalise the
+ * result so it can be stored as a unit vector in the pgvector column.
+ *
+ * Averaging multiple face photos and normalising gives a representative
+ * "centroid" embedding that pgvector can compare efficiently with cosine
+ * distance (<=> operator).
+ *
+ * @param embeddings  1-3 L2-normalised 128-D SFace vectors.
+ * @returns           L2-normalised mean vector as a flat number[].
+ */
+function computeMeanAndNormalize(embeddings: number[][]): number[] {
+  const dim  = 128;
+  const mean = new Array<number>(dim).fill(0);
+
+  for (const emb of embeddings) {
+    for (let i = 0; i < dim; i++) {
+      mean[i] = (mean[i] ?? 0) + (emb[i] ?? 0);
+    }
+  }
+  for (let i = 0; i < dim; i++) {
+    mean[i] = (mean[i] ?? 0) / embeddings.length;
+  }
+
+  // L2 normalise so cosine distance is equivalent to Euclidean distance
+  const norm = Math.sqrt(mean.reduce((s, v) => s + v * v, 0));
+  if (norm > 0) {
+    for (let i = 0; i < dim; i++) mean[i] = (mean[i] ?? 0) / norm;
+  }
+
+  return mean;
+}
+
+/**
+ * BUG-06: Determines whether an image string is a newly captured Base64 image
+ * or an existing Supabase HTTPS URL (loaded from the DB on mount).
+ *
+ * Returns true if the string looks like a raw data URI (Base64-encoded image).
+ * Returns false for HTTPS URLs or any other non-Base64 value.
+ */
+function isBase64DataUri(s: string): boolean {
+  return s.startsWith('data:image/') && s.includes(';base64,');
+}
+
 // ---------------------------------------------------------------------------
 // Controllers
 // ---------------------------------------------------------------------------
@@ -32,24 +72,16 @@ function parseFaceEmbedding(raw: unknown): number[][] | null {
 /**
  * POST /api/profile/upload-faces
  *
- * Accepts exactly 3 Base64-encoded face photos from a student.
+ * BUG-06 fix: The frontend sends `images` where each slot is either:
+ *   - A new Base64 data URI (newly captured by the student)
+ *   - An existing Supabase HTTPS URL (unchanged, loaded from DB on mount)
+ *   - null (empty slot — rejected, all 3 must be filled)
  *
- * Pipeline:
- *  1. Validate payload (3 images required).
- *  2. Upload all 3 images to Supabase Storage in parallel.
- *  3. Call /register-face on the AI service for each image in parallel.
- *     - Uses Promise.allSettled so a single bad photo never blocks the rest.
- *  4. Collect all successful embeddings.
- *  5. Persist image URLs + embeddings to the StudentProfile row in one update.
- *  6. Return a structured response with an embedding status field:
- *     - "complete"  → all 3 embeddings registered
- *     - "partial"   → 1 or 2 of 3 embeddings registered (warns user)
- *     - "none"      → 0 embeddings registered (warns user to re-upload)
+ * For Base64 slots: upload to Supabase + register embedding with AI service.
+ * For URL slots:    skip re-upload, skip re-embedding, keep existing DB values.
  *
- * The image URLs (faceData1/2/3) are always persisted even when embedding
- * extraction fails, so the student's photos are visible in the UI immediately.
- * The student will not be recognized in attendance until at least one embedding
- * is present.
+ * This prevents the data corruption bug where saving an unchanged profile
+ * would send HTTPS URLs to saveBase64Image (crash) and wipe faceEmbedding.
  */
 export const updateStudentImages = async (req: AuthRequest, res: Response) => {
   try {
@@ -66,61 +98,96 @@ export const updateStudentImages = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Validate every entry is a non-empty string before expensive I/O
+    // Validate: every entry must be a non-empty string
     const imageStrings = images as unknown[];
     for (let i = 0; i < imageStrings.length; i++) {
       if (typeof imageStrings[i] !== 'string' || !(imageStrings[i] as string).trim()) {
         return res.status(400).json({
-          message: `Image at index ${i} is missing or not a valid Base64 string.`,
+          message: `Image at index ${i} is missing or not a valid string.`,
         });
       }
     }
 
     const [img1, img2, img3] = imageStrings as [string, string, string];
 
-    // ── Step 1: Upload images to Supabase in parallel ───────────────────────
-    // These are the public URLs stored in the DB for UI display purposes.
+    // BUG-06: Load existing profile to get current DB values for unchanged slots
+    const existingProfile = await db.studentProfile.findUnique({
+      where: { userId },
+      select: { faceData1: true, faceData2: true, faceData3: true, faceEmbedding: true },
+    });
+
+    const existingUrls = [
+      existingProfile?.faceData1 ?? null,
+      existingProfile?.faceData2 ?? null,
+      existingProfile?.faceData3 ?? null,
+    ];
+    const existingEmbeddings = parseFaceEmbedding(existingProfile?.faceEmbedding) ?? [];
+
+    // ── Step 1: Upload only NEW Base64 images to Supabase ────────────────────
+    const uploadSlot = async (img: string, existingUrl: string | null, filename: string) => {
+      if (isBase64DataUri(img)) {
+        return saveBase64Image(img, userId, filename); // new capture → upload
+      }
+      return existingUrl ?? img; // already a URL → keep it
+    };
+
     let path1: string, path2: string, path3: string;
     try {
       [path1, path2, path3] = await Promise.all([
-        saveBase64Image(img1, userId, 'face_1.jpg'),
-        saveBase64Image(img2, userId, 'face_2.jpg'),
-        saveBase64Image(img3, userId, 'face_3.jpg'),
+        uploadSlot(img1, existingUrls[0] ?? null, 'face_1.jpg'),
+        uploadSlot(img2, existingUrls[1] ?? null, 'face_2.jpg'),
+        uploadSlot(img3, existingUrls[2] ?? null, 'face_3.jpg'),
       ]);
     } catch (uploadError) {
       console.error('[Profile] Supabase upload failed:', uploadError);
       return res.status(500).json({ message: 'Error uploading images to storage.' });
     }
 
-    // ── Step 2: Register embeddings in parallel with the AI service ──────────
-    // allSettled ensures one failing image never prevents the others from
-    // being processed. Failures are surfaced as warnings, not hard errors.
-    const embeddingResults = await Promise.allSettled([
-      registerFace(img1, userId),
-      registerFace(img2, userId),
-      registerFace(img3, userId),
-    ]);
+    // ── Step 2: Register embeddings only for NEW images ──────────────────────
+    // For unchanged URL slots we reuse the existing embeddings (if any).
+    // This prevents re-registering and potentially losing existing embeddings.
+    const imgs = [img1, img2, img3];
+    const isNew = imgs.map(isBase64DataUri);
+    const newCount = isNew.filter(Boolean).length;
 
-    const successfulEmbeddings: number[][] = [];
+    let successfulEmbeddings: number[][];
     const failedPhotoIndices: number[] = [];
 
+    if (newCount === 0) {
+      // BUG-06: No new images — nothing changed. Return existing data.
+      return res.status(200).json({
+        message: 'No changes detected. Profile data is already up to date.',
+        urls: [path1, path2, path3],
+        embeddings_registered: existingEmbeddings.length,
+        embedding_status: existingEmbeddings.length === 3 ? 'complete'
+          : existingEmbeddings.length > 0 ? 'partial' : 'none',
+      });
+    }
+
+    // Only call AI for new images; keep existing embedding vectors for unchanged slots
+    const embeddingResults = await Promise.allSettled(
+      imgs.map((img, i) =>
+        isNew[i] ? registerFace(img, userId) : Promise.resolve(existingEmbeddings[i] ?? null),
+      ),
+    );
+
+    successfulEmbeddings = [];
     embeddingResults.forEach((result, idx) => {
       if (result.status === 'fulfilled' && result.value !== null) {
         successfulEmbeddings.push(result.value);
       } else {
-        failedPhotoIndices.push(idx + 1); // 1-indexed for the user-facing message
-        if (result.status === 'rejected') {
-          console.error(`[Profile] Embedding extraction failed for photo ${idx + 1}:`, result.reason);
-        } else {
-          // AI service returned null (e.g. 422 — wrong number of faces)
-          console.warn(`[Profile] No embedding returned for photo ${idx + 1} (student: ${userId})`);
+        if (isNew[idx]) {
+          failedPhotoIndices.push(idx + 1);
+          if (result.status === 'rejected') {
+            console.error(`[Profile] Embedding extraction failed for photo ${idx + 1}:`, result.reason);
+          } else {
+            console.warn(`[Profile] No embedding returned for photo ${idx + 1} (student: ${userId})`);
+          }
         }
       }
     });
 
-    // ── Step 3: Persist to database in a single update ──────────────────────
-    // faceEmbedding is set to the array of successful embeddings, or null if
-    // none succeeded. Prisma accepts number[][] directly as a Json value.
+    // ── Step 3: Persist to database ──────────────────────────────────────────
     await db.studentProfile.update({
       where: { userId },
       data: {
@@ -133,15 +200,30 @@ export const updateStudentImages = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // ── Step 4: Build structured response ───────────────────────────────────
-    const embeddingsRegistered = successfulEmbeddings.length;
+    // ── Step 3b: Write mean embedding to faceVector (pgvector column) ────────
+    // The pgvector column stores the L2-normalised mean of all successful
+    // embeddings. The Phase 5 worker uses this for HNSW cosine-distance search.
+    if (successfulEmbeddings.length > 0) {
+      try {
+        const meanEmbedding  = computeMeanAndNormalize(successfulEmbeddings);
+        const vectorLiteral  = `[${meanEmbedding.join(',')}]`;
+        await db.$executeRawUnsafe(
+          `UPDATE "StudentProfile" SET "faceVector" = $1::vector WHERE "userId" = $2`,
+          vectorLiteral,
+          userId,
+        );
+        console.log(`[Profile] faceVector updated for student ${userId}.`);
+      } catch (vecErr) {
+        // Non-fatal: faceEmbedding (JSONB) is already saved above.
+        // The pgvector path skips students where faceVector IS NULL.
+        // Student can re-upload to fix this.
+        console.warn(`[Profile] faceVector update failed for ${userId}:`, vecErr);
+      }
+    }
 
-    if (embeddingsRegistered === 0) {
-      // No embeddings stored — student will not be recognized until re-upload
-      console.warn(
-        `[Profile] No embeddings stored for student ${userId}. ` +
-        'AI service may be unavailable.',
-      );
+    // ── Step 4: Structured response ──────────────────────────────────────────
+    if (successfulEmbeddings.length === 0) {
+      console.warn(`[Profile] No embeddings stored for student ${userId}.`);
       return res.status(207).json({
         message: 'Face photos uploaded but embeddings could not be registered.',
         urls: [path1, path2, path3],
@@ -155,25 +237,23 @@ export const updateStudentImages = async (req: AuthRequest, res: Response) => {
     }
 
     if (failedPhotoIndices.length > 0) {
-      // Partial success — some photos were processed, some were not
       return res.status(200).json({
         message: 'Face data updated with partial embeddings.',
         urls: [path1, path2, path3],
-        embeddings_registered: embeddingsRegistered,
+        embeddings_registered: successfulEmbeddings.length,
         embedding_status: 'partial',
         warning:
-          `${failedPhotoIndices.length} of 3 photo(s) could not be processed ` +
+          `${failedPhotoIndices.length} of ${newCount} new photo(s) could not be processed ` +
           `(photo ${failedPhotoIndices.join(', ')}). ` +
           'Ensure each photo shows exactly one clear, well-lit face. ' +
           'Recognition may be less accurate.',
       });
     }
 
-    // Full success
     return res.status(200).json({
       message: 'Face data updated successfully.',
       urls: [path1, path2, path3],
-      embeddings_registered: embeddingsRegistered,
+      embeddings_registered: successfulEmbeddings.length,
       embedding_status: 'complete',
     });
 
@@ -185,10 +265,7 @@ export const updateStudentImages = async (req: AuthRequest, res: Response) => {
 
 /**
  * GET /api/profile
- *
- * Returns the authenticated student's profile row.
- * The faceEmbedding column is excluded from the response — embeddings are
- * binary ML artefacts, not user-facing data.
+ * Returns the authenticated user's profile row (embeddings excluded).
  */
 export const getProfile = async (req: AuthRequest, res: Response) => {
   try {

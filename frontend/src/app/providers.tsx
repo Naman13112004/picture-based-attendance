@@ -2,6 +2,7 @@
 
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "sonner";
 
 import { useEffect } from "react";
 import { useAuth } from "@/store/useAuth";
@@ -29,6 +30,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         disableTransitionOnChange
       >
         {children}
+        <Toaster richColors position="top-center" />
       </ThemeProvider>
     </GoogleOAuthProvider>
   );

@@ -14,6 +14,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { Loader2 } from "lucide-react";
 import api from "@/lib/api";
+import { toast } from "sonner";
 
 interface StudentRecord {
     studentId: string;
@@ -83,10 +84,11 @@ export const ManualAttendanceModal = ({
             });
 
             onUpdateSuccess();
+            toast.success("Attendance updated successfully");
             onClose();
         } catch (error) {
             console.error("Failed to update manual attendance", error);
-            alert("Failed to save changes. Please try again.");
+            toast.error("Failed to save changes. Please try again.");
         } finally {
             setIsSaving(false);
         }

@@ -3,6 +3,7 @@
 import api from "@/lib/api";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
@@ -14,11 +15,11 @@ const StudentJoin = () => {
         setIsLoading(true);
         try {
             const res = await api.post('/classrooms/join', { code });
-            alert(res.data.message); // "Successfully joined Class Name"
+            toast.success(res.data.message); // "Successfully joined Class Name"
             setCode("");
         } catch (error: unknown) {
             const e = error as { response?: { data?: { message?: string } } };
-            alert(e.response?.data?.message || "Failed to join class");
+            toast.error(e.response?.data?.message || "Failed to join class");
         } finally {
             setIsLoading(false);
         }

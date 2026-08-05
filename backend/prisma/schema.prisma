@@ -1,10 +1,12 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
 }
 
 model User {
@@ -18,18 +20,20 @@ model User {
   attendances     Attendance[]
   taughtClasses   Classroom[]     @relation("TeacherClasses")
   studentProfiles StudentProfile?
+  attendanceJobs  AttendanceJob[] @relation("TeacherJobs")
 }
 
 model Classroom {
-  id          String           @id @default(uuid())
-  name        String
-  code        String           @unique
-  schedule    String?
-  teacherId   String
-  createdAt   DateTime         @default(now())
-  attendances Attendance[]
-  teacher     User             @relation("TeacherClasses", fields: [teacherId], references: [id], onDelete: Cascade)
-  students    StudentProfile[] @relation("ClassroomToStudentProfile")
+  id             String          @id @default(uuid())
+  name           String
+  code           String          @unique
+  schedule       String?
+  teacherId      String
+  createdAt      DateTime        @default(now())
+  attendances    Attendance[]
+  teacher        User            @relation("TeacherClasses", fields: [teacherId], references: [id], onDelete: Cascade)
+  students       StudentProfile[] @relation("ClassroomToStudentProfile")
+  attendanceJobs AttendanceJob[]
 }
 
 model StudentProfile {
@@ -42,18 +46,60 @@ model StudentProfile {
   /// 128-dimensional vectors, one per reference image. Populated on face upload.
   /// Null means the student has no registered embedding and cannot be recognized.
   faceEmbedding Json?
+  /// pgvector column — stores the primary (first) 128-D SFace embedding as a
+  /// native vector type for fast cosine similarity search via HNSW index.
+  /// Populated alongside faceEmbedding when a student registers their face.
+  /// Used by the attendance worker to run DB-side similarity filtering.
+  faceVector    Unsupported("vector(128)")?
   user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   classrooms    Classroom[] @relation("ClassroomToStudentProfile")
 }
 
 model Attendance {
   id        String    @id @default(uuid())
-  date      DateTime  @default(now())
+  date      DateTime
   status    Status
   studentId String
   classId   String
   classroom Classroom @relation(fields: [classId], references: [id], onDelete: Cascade)
   student   User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, classId, date])
+  @@index([studentId])
+  @@index([classId, date])
+}
+
+/// Tracks the lifecycle of an async attendance-processing job.
+/// Created when a teacher submits a classroom photo via POST /api/attendance/mark.
+/// The BullMQ worker picks up the job, calls FastAPI, and updates this record.
+model AttendanceJob {
+  id          String    @id @default(uuid())
+  classId     String
+  teacherId   String
+  /// Supabase Storage public URL of the uploaded classroom photo.
+  imageUrl    String
+  /// YYYY-MM-DD local date string supplied by the teacher's client.
+  date        String
+  status      JobStatus @default(QUEUED)
+  /// Number of processing attempts made so far (incremented on each failure).
+  attempts    Int       @default(0)
+  /// Maximum number of attempts before the job is moved to DEAD status.
+  maxAttempts Int       @default(3)
+  /// Human-readable description of the last failure, if any.
+  lastError   String?
+  /// JSON blob of the final attendance result once COMPLETED.
+  /// Shape: { total_faces_detected, present_student_ids, absent_count, warning? }
+  result      Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  classroom   Classroom @relation(fields: [classId], references: [id], onDelete: Cascade)
+  teacher     User      @relation("TeacherJobs", fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@index([classId])
+  @@index([teacherId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([classId, date, status])
 }
 
 enum Role {
@@ -64,4 +110,18 @@ enum Role {
 enum Status {
   PRESENT
   ABSENT
+}
+
+/// Lifecycle states for an async attendance job.
+enum JobStatus {
+  /// Job has been enqueued but not yet picked up by a worker.
+  QUEUED
+  /// Worker is currently processing the job (calling FastAPI + saving records).
+  PROCESSING
+  /// Job completed successfully — attendance records have been written.
+  COMPLETED
+  /// Job failed on the last attempt but has not yet exhausted all retries.
+  FAILED
+  /// Job has exhausted all retry attempts and is in the dead-letter state.
+  DEAD
 }

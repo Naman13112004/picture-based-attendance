@@ -15,30 +15,92 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
+import time
+from collections import defaultdict
+from contextlib import asynccontextmanager
+from typing import Any
 
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from config import SIMILARITY_THRESHOLD
-from model_manager import initialize_models, get_detector, get_recognizer
+from model_manager import (
+    initialize_models,
+    get_detector,
+    get_recognizer,
+    is_models_ready,
+)
 from models import (
     AttendanceRequest,
     RecognitionResponse,
     RegisterFaceRequest,
     RegisterFaceResponse,
+    ExtractEmbeddingsRequest,
+    ExtractEmbeddingsResponse,
 )
 from pipeline.detector import detect_faces
 from pipeline.embedder import get_embeddings, get_single_embedding
 from pipeline.image_loader import load_image_from_b64
 from pipeline.matcher import build_class_matrix, match_student_vectorized
-from pipeline.preprocessor import enhance_image
+from pipeline.preprocessor import enhance_image, validate_image
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("ai-service")
+
+# ---------------------------------------------------------------------------
+# In-process metrics (reset on restart — use Prometheus for production)
+# ---------------------------------------------------------------------------
+
+_metrics: dict[str, Any] = {
+    "requests_total": defaultdict(int),  # endpoint → count
+    "errors_total": defaultdict(int),  # endpoint → count
+    "latency_ms_sum": defaultdict(float),  # endpoint → total ms
+    "latency_ms_count": defaultdict(int),  # endpoint → sample count
+    "faces_detected_total": 0,
+    "started_at": time.time(),
+}
+
+
+def _record(endpoint: str, elapsed_ms: float, error: bool = False) -> None:
+    _metrics["requests_total"][endpoint] += 1
+    _metrics["latency_ms_sum"][endpoint] += elapsed_ms
+    _metrics["latency_ms_count"][endpoint] += 1
+    if error:
+        _metrics["errors_total"][endpoint] += 1
+
+
+# ---------------------------------------------------------------------------
+# Lifespan (replaces deprecated @app.on_event("startup"))
+# ---------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Application lifespan manager — replaces the deprecated on_event("startup").
+
+    On startup:
+      - Downloads YuNet and SFace ONNX models if not cached locally.
+      - Initialises the OpenCV DNN instances as module-level singletons.
+
+    On shutdown:
+      - Placeholder for graceful cleanup (connection pools, temp files, etc.).
+    """
+    logger.info("AI service starting up — initialising face recognition pipeline...")
+    initialize_models()
+    logger.info("Pipeline ready. Models loaded and warmed up.")
+    yield
+    logger.info("AI service shutting down.")
+
+
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
 
 app = FastAPI(
     title="SnapAttend AI Service",
@@ -47,7 +109,8 @@ app = FastAPI(
         "Provides pre-computation of student embeddings at registration time and "
         "fully vectorized matching at attendance time."
     ),
-    version="2.0.0",
+    version="3.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -57,61 +120,139 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # ---------------------------------------------------------------------------
-# Lifecycle
+# Correlation ID middleware
 # ---------------------------------------------------------------------------
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    """Download and initialize face detection/recognition models on startup."""
-    logger.info("Initializing face recognition pipeline...")
-    initialize_models()
-    logger.info("Pipeline ready.")
 
 
+@app.middleware("http")
+async def correlation_middleware(request: Request, call_next):
+    """
+    Forward or generate a correlation ID for every request.
+    The ID is added to all log lines and echoed in the response header
+    so Node.js workers can correlate their BullMQ job logs with AI service logs.
+    """
+    correlation_id = (
+        request.headers.get("x-correlation-id")
+        or request.headers.get("x-request-id")
+        or f"ai-{int(time.time() * 1000)}"
+    )
+    # Attach to request state so endpoint handlers can read it
+    request.state.correlation_id = correlation_id
+
+    response = await call_next(request)
+    response.headers["X-Correlation-Id"] = correlation_id
+    return response
+
+
 # ---------------------------------------------------------------------------
-# Health check
+# Helper: extract correlation ID from request state
 # ---------------------------------------------------------------------------
+
+
+def _cid(request: Request) -> str:
+    return getattr(request.state, "correlation_id", "-")
+
+
+# ---------------------------------------------------------------------------
+# Health / readiness
+# ---------------------------------------------------------------------------
+
 
 @app.get("/", tags=["health"])
 def read_root() -> dict:
-    """Basic liveness check."""
-    return {"status": "AI Service is Running", "version": "2.0.0"}
+    """Basic liveness check — always returns 200 if the process is running."""
+    return {"status": "AI Service is Running", "version": "3.0.0"}
+
+
+@app.get("/ready", tags=["health"])
+def readiness_probe() -> JSONResponse:
+    """
+    Readiness probe — returns 200 only after models are fully initialised.
+    Returns 503 during cold start / model download.
+
+    Load balancers and Docker healthchecks should use this endpoint,
+    NOT the liveness `/` endpoint, so no traffic is routed until the
+    pipeline is actually ready to serve requests.
+    """
+    if not is_models_ready():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "not_ready",
+                "detail": "Models are not yet initialised.",
+            },
+        )
+    return JSONResponse(
+        status_code=200,
+        content={"status": "ready", "version": "3.0.0"},
+    )
+
+
+@app.get("/metrics", tags=["observability"])
+def get_metrics() -> dict:
+    """
+    Lightweight in-process metrics endpoint.
+    Returns request counts, error rates, and mean latency per endpoint.
+    Resets on process restart — use Prometheus/Grafana for persistent metrics.
+    """
+    summary: dict[str, Any] = {
+        "uptime_seconds": round(time.time() - _metrics["started_at"], 1),
+        "faces_detected_total": _metrics["faces_detected_total"],
+        "endpoints": {},
+    }
+    endpoints: set[str] = set(_metrics["requests_total"].keys())
+    for ep in endpoints:
+        total = _metrics["requests_total"][ep]
+        errors = _metrics["errors_total"][ep]
+        lat_sum = _metrics["latency_ms_sum"][ep]
+        lat_cnt = _metrics["latency_ms_count"][ep]
+        summary["endpoints"][ep] = {
+            "requests_total": total,
+            "errors_total": errors,
+            "mean_latency_ms": round(lat_sum / lat_cnt, 1) if lat_cnt > 0 else 0.0,
+        }
+    return summary
 
 
 # ---------------------------------------------------------------------------
-# Registration endpoint — called once per student face upload
+# Registration endpoint
 # ---------------------------------------------------------------------------
+
 
 @app.post("/register-face", response_model=RegisterFaceResponse, tags=["registration"])
-async def register_face(data: RegisterFaceRequest) -> RegisterFaceResponse:
+async def register_face(
+    data: RegisterFaceRequest, request: Request
+) -> RegisterFaceResponse:
     """
     Extract and return the SFace embedding for a single student reference photo.
 
-    This endpoint is called by the Node.js backend whenever a student uploads
-    or updates their face photo(s). The returned embedding is persisted in
-    PostgreSQL so that recognition never needs to process student reference
-    images again.
-
-    Pipeline:
-        1. Decode Base64 image from memory (no disk I/O)
-        2. Preprocess (CLAHE, sharpening, upscale if needed)
-        3. Detect faces with YuNet
-        4. Validate exactly one face is present
-        5. Extract 128-D SFace embedding
-        6. Return the embedding as a flat float list
+    Phase 6 additions:
+    - Per-request timing (decode, preprocess, detect, embed) returned in logs.
+    - Correlation ID forwarded through all log lines.
+    - Input validation before expensive processing.
 
     Raises:
-        400: Image could not be decoded (corrupted / invalid Base64 / wrong format)
-        422: Zero faces detected, or more than one face detected
-        503: AI models not yet initialized
+        400: Image could not be decoded or fails validation.
+        422: Zero faces detected, or more than one face detected.
+        503: AI models not yet initialized.
     """
-    logger.info("register-face: student_id=%s", data.student_id)
+    cid = _cid(request)
+    t0 = time.perf_counter()
 
-    # 1. Decode image from Base64 in memory
+    logger.info("[%s] register-face: student_id=%s", cid, data.student_id)
+
+    if not is_models_ready():
+        _record("register-face", 0, error=True)
+        raise HTTPException(
+            status_code=503, detail="Models not yet initialised. Retry in a moment."
+        )
+
+    # 1. Decode
+    t_decode = time.perf_counter()
     image = load_image_from_b64(data.image_b64)
     if image is None:
+        _record("register-face", (time.perf_counter() - t0) * 1000, error=True)
         raise HTTPException(
             status_code=400,
             detail=(
@@ -120,17 +261,31 @@ async def register_face(data: RegisterFaceRequest) -> RegisterFaceResponse:
             ),
         )
 
+    # 1b. Validate image dimensions
+    validation_error = validate_image(image)
+    if validation_error:
+        _record("register-face", (time.perf_counter() - t0) * 1000, error=True)
+        raise HTTPException(status_code=400, detail=validation_error)
+
+    decode_ms = (time.perf_counter() - t_decode) * 1000
+
     # 2. Preprocess
+    t_preprocess = time.perf_counter()
     image = enhance_image(image)
+    preprocess_ms = (time.perf_counter() - t_preprocess) * 1000
 
-    # 3. Detect faces
+    # 3. Detect
+    t_detect = time.perf_counter()
     faces = detect_faces(image)
+    detect_ms = (time.perf_counter() - t_detect) * 1000
 
-    # 4. Validate face count
     if faces is None or len(faces) == 0:
         logger.warning(
-            "register-face: no face detected for student_id=%s", data.student_id
+            "[%s] register-face: no face detected for student_id=%s",
+            cid,
+            data.student_id,
         )
+        _record("register-face", (time.perf_counter() - t0) * 1000, error=True)
         raise HTTPException(
             status_code=422,
             detail=(
@@ -141,10 +296,12 @@ async def register_face(data: RegisterFaceRequest) -> RegisterFaceResponse:
 
     if len(faces) > 1:
         logger.warning(
-            "register-face: %d faces detected for student_id=%s (expected 1)",
+            "[%s] register-face: %d faces detected for student_id=%s (expected 1)",
+            cid,
             len(faces),
             data.student_id,
         )
+        _record("register-face", (time.perf_counter() - t0) * 1000, error=True)
         raise HTTPException(
             status_code=422,
             detail=(
@@ -154,64 +311,78 @@ async def register_face(data: RegisterFaceRequest) -> RegisterFaceResponse:
             ),
         )
 
-    # 5. Extract 128-D embedding from the single detected face
+    # 4. Embed
+    t_embed = time.perf_counter()
     embedding_array: np.ndarray = get_single_embedding(image, faces[0])
+    embed_ms = (time.perf_counter() - t_embed) * 1000
 
-    # Flatten from (1, 128) to (128,) if needed, then convert to Python list
     embedding: list[float] = embedding_array.flatten().tolist()
+    total_ms = (time.perf_counter() - t0) * 1000
 
     logger.info(
-        "register-face: embedding extracted successfully for student_id=%s "
-        "(dim=%d)",
+        "[%s] register-face: student_id=%s | dim=%d | "
+        "decode=%.1fms preprocess=%.1fms detect=%.1fms embed=%.1fms total=%.1fms",
+        cid,
         data.student_id,
         len(embedding),
+        decode_ms,
+        preprocess_ms,
+        detect_ms,
+        embed_ms,
+        total_ms,
     )
+
+    _record("register-face", total_ms)
+    _metrics["faces_detected_total"] += 1
 
     return RegisterFaceResponse(student_id=data.student_id, embedding=embedding)
 
 
 # ---------------------------------------------------------------------------
-# Recognition endpoint — hot path for every attendance session
+# Recognition endpoint (legacy — still supported)
 # ---------------------------------------------------------------------------
 
+
 @app.post("/recognize", response_model=RecognitionResponse, tags=["attendance"])
-async def recognize_faces(data: AttendanceRequest) -> RecognitionResponse:
+async def recognize_faces(
+    data: AttendanceRequest, request: Request
+) -> RecognitionResponse:
     """
     Identify which enrolled students are present in a classroom photo.
 
-    This endpoint receives:
-    - The classroom photo as a Base64-encoded string (decoded in memory — never
-      written to disk or uploaded to any storage service).
-    - A list of enrolled students with their pre-computed embeddings (loaded
-      from the database by Node.js — no per-student downloads or inference).
+    Phase 6 additions:
+    - Per-request timing per stage returned in logs.
+    - Correlation ID propagated.
+    - Input validation before heavy processing.
+    - Readiness guard.
 
-    Recognition pipeline:
-        1. Decode classroom image from Base64 in memory
-        2. Preprocess the classroom image
-        3. Detect all faces in the classroom image
-        4. Extract 128-D embeddings for every detected face
-        5. Build a (F × 128) class-face matrix once
-        6. For each student, perform a single vectorized matrix multiplication
-           to compute all cosine similarities simultaneously — no nested loops
-        7. Return matched student IDs with the same response schema as before
-
-    The outer Python loop over students remains (one iteration per student) but
-    the inner comparison — previously O(S_i × F) Python iterations — is now a
-    single NumPy BLAS call. Total complexity is O(students) Python calls, each
-    doing O(S_i × F) arithmetic in compiled C.
+    Note: The /extract-embeddings endpoint (Phase 5 pgvector path) is preferred.
+    This endpoint is kept for backward compatibility and manual testing.
 
     Raises:
-        400: Classroom image could not be decoded
-        503: AI models not yet initialized
+        400: Classroom image could not be decoded.
+        503: AI models not yet initialized.
     """
+    cid = _cid(request)
+    t0 = time.perf_counter()
+
     logger.info(
-        "recognize: processing attendance for %d enrolled student(s)",
+        "[%s] recognize: processing %d enrolled student(s)",
+        cid,
         len(data.students),
     )
 
-    # 1. Decode classroom image from Base64 in memory — zero disk I/O
+    if not is_models_ready():
+        _record("recognize", 0, error=True)
+        raise HTTPException(
+            status_code=503, detail="Models not yet initialised. Retry in a moment."
+        )
+
+    # 1. Decode + validate
+    t_decode = time.perf_counter()
     class_image = load_image_from_b64(data.class_image_b64)
     if class_image is None:
+        _record("recognize", (time.perf_counter() - t0) * 1000, error=True)
         raise HTTPException(
             status_code=400,
             detail=(
@@ -220,33 +391,43 @@ async def recognize_faces(data: AttendanceRequest) -> RecognitionResponse:
             ),
         )
 
-    # 2. Preprocess classroom image
-    class_image = enhance_image(class_image)
+    validation_error = validate_image(class_image)
+    if validation_error:
+        _record("recognize", (time.perf_counter() - t0) * 1000, error=True)
+        raise HTTPException(status_code=400, detail=validation_error)
 
-    # 3. Detect all faces in the classroom photo
+    decode_ms = (time.perf_counter() - t_decode) * 1000
+
+    # 2. Preprocess
+    t_preprocess = time.perf_counter()
+    class_image = enhance_image(class_image)
+    preprocess_ms = (time.perf_counter() - t_preprocess) * 1000
+
+    # 3. Detect
+    t_detect = time.perf_counter()
     class_faces = detect_faces(class_image)
+    detect_ms = (time.perf_counter() - t_detect) * 1000
 
     if class_faces is None or len(class_faces) == 0:
-        logger.info("recognize: no faces detected in classroom image")
+        logger.info("[%s] recognize: no faces detected", cid)
+        _record("recognize", (time.perf_counter() - t0) * 1000)
         return RecognitionResponse(
             total_faces_detected=0,
             present_student_ids=[],
             absent_count=len(data.students),
         )
 
-    # 4. Extract embeddings for all detected class faces
+    # 4. Embed all faces
+    t_embed = time.perf_counter()
     class_embeddings_list = get_embeddings(class_image, class_faces)
-    logger.info(
-        "recognize: detected %d face(s) in classroom image",
-        len(class_embeddings_list),
-    )
+    embed_ms = (time.perf_counter() - t_embed) * 1000
 
-    # 5. Build the (F, 128) class matrix ONCE — reused for every student
+    # 5. Build class matrix once
     class_matrix = build_class_matrix(class_embeddings_list)
 
-    # 6. Vectorized matching — one matrix multiply per student, no inner loops
+    # 6. Vectorized matching
+    t_match = time.perf_counter()
     present_student_ids: list[str] = []
-
     for student in data.students:
         is_present = match_student_vectorized(
             student.embeddings,
@@ -254,19 +435,142 @@ async def recognize_faces(data: AttendanceRequest) -> RecognitionResponse:
             threshold=SIMILARITY_THRESHOLD,
         )
         if is_present:
-            logger.info("recognize: student %s → PRESENT", student.id)
             present_student_ids.append(student.id)
-        else:
-            logger.info("recognize: student %s → ABSENT", student.id)
+
+    match_ms = (time.perf_counter() - t_match) * 1000
+    total_ms = (time.perf_counter() - t0) * 1000
 
     logger.info(
-        "recognize: %d/%d students present",
+        "[%s] recognize: %d/%d present | faces=%d | "
+        "decode=%.1fms preprocess=%.1fms detect=%.1fms embed=%.1fms match=%.1fms total=%.1fms",
+        cid,
         len(present_student_ids),
         len(data.students),
+        len(class_embeddings_list),
+        decode_ms,
+        preprocess_ms,
+        detect_ms,
+        embed_ms,
+        match_ms,
+        total_ms,
     )
+
+    _record("recognize", total_ms)
+    _metrics["faces_detected_total"] += len(class_embeddings_list)
 
     return RecognitionResponse(
         total_faces_detected=len(class_embeddings_list),
         present_student_ids=present_student_ids,
         absent_count=len(data.students) - len(present_student_ids),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Embedding extraction endpoint (Phase 5 pgvector path)
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/extract-embeddings", response_model=ExtractEmbeddingsResponse, tags=["attendance"]
+)
+async def extract_embeddings(
+    data: ExtractEmbeddingsRequest, request: Request
+) -> ExtractEmbeddingsResponse:
+    """
+    Detect all faces in a classroom photo and return their 128-D embeddings.
+
+    Phase 6 additions:
+    - Per-request timing in logs.
+    - Correlation ID forwarded.
+    - Input validation before processing.
+    - Readiness guard.
+
+    Pipeline:
+        1. Decode classroom image from Base64 in memory
+        2. Validate dimensions
+        3. Preprocess image (CLAHE, sharpening)
+        4. Detect all faces with YuNet
+        5. Extract 128-D L2-normalised SFace embedding per face
+        6. Return embeddings as nested float lists
+
+    Raises:
+        400: Classroom image could not be decoded or fails validation.
+        503: AI models not yet initialized.
+    """
+    cid = _cid(request)
+    t0 = time.perf_counter()
+
+    logger.info("[%s] extract-embeddings: processing classroom image", cid)
+
+    if not is_models_ready():
+        _record("extract-embeddings", 0, error=True)
+        raise HTTPException(
+            status_code=503, detail="Models not yet initialised. Retry in a moment."
+        )
+
+    # 1. Decode
+    t_decode = time.perf_counter()
+    class_image = load_image_from_b64(data.class_image_b64)
+    if class_image is None:
+        _record("extract-embeddings", (time.perf_counter() - t0) * 1000, error=True)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Could not decode the classroom image. Ensure the payload contains "
+                "a valid Base64-encoded JPEG, PNG, or WebP image."
+            ),
+        )
+
+    # 1b. Validate
+    validation_error = validate_image(class_image)
+    if validation_error:
+        _record("extract-embeddings", (time.perf_counter() - t0) * 1000, error=True)
+        raise HTTPException(status_code=400, detail=validation_error)
+
+    decode_ms = (time.perf_counter() - t_decode) * 1000
+
+    # 2. Preprocess
+    t_preprocess = time.perf_counter()
+    class_image = enhance_image(class_image)
+    preprocess_ms = (time.perf_counter() - t_preprocess) * 1000
+
+    # 3. Detect
+    t_detect = time.perf_counter()
+    class_faces = detect_faces(class_image)
+    detect_ms = (time.perf_counter() - t_detect) * 1000
+
+    if class_faces is None or len(class_faces) == 0:
+        logger.info("[%s] extract-embeddings: no faces detected", cid)
+        _record("extract-embeddings", (time.perf_counter() - t0) * 1000)
+        return ExtractEmbeddingsResponse(face_count=0, embeddings=[])
+
+    # 4. Embed
+    t_embed = time.perf_counter()
+    class_embeddings_list = get_embeddings(class_image, class_faces)
+    embed_ms = (time.perf_counter() - t_embed) * 1000
+
+    total_ms = (time.perf_counter() - t0) * 1000
+
+    logger.info(
+        "[%s] extract-embeddings: %d face(s) | "
+        "decode=%.1fms preprocess=%.1fms detect=%.1fms embed=%.1fms total=%.1fms",
+        cid,
+        len(class_embeddings_list),
+        decode_ms,
+        preprocess_ms,
+        detect_ms,
+        embed_ms,
+        total_ms,
+    )
+
+    _record("extract-embeddings", total_ms)
+    _metrics["faces_detected_total"] += len(class_embeddings_list)
+
+    embeddings_out: list[list[float]] = [
+        emb.flatten().tolist() for emb in class_embeddings_list
+    ]
+
+    return ExtractEmbeddingsResponse(
+        face_count=len(embeddings_out),
+        embeddings=embeddings_out,
     )

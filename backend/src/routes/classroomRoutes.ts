@@ -1,25 +1,32 @@
 import { Router } from 'express';
 import { authenticate, requireRole } from '../middlewares/authMiddleware.js';
-import { 
-    createClassroom, 
-    joinClassroom, 
-    getClassrooms, 
-    updateClassroom, 
-    deleteClassroom 
+import { validate } from '../middlewares/validationMiddleware.js';
+import {
+  createClassroom,
+  joinClassroom,
+  getClassrooms,
+  updateClassroom,
+  deleteClassroom,
 } from '../controllers/classroomController.js';
+import {
+  createClassroomSchema,
+  joinClassroomSchema,
+  updateClassroomSchema,
+} from '../schemas/classroomSchema.js';
 
 const router = Router();
 
-// Get all classes (for the logged in user)
+// Get all classrooms for the logged-in user
 router.get('/', authenticate, getClassrooms);
 
-// Create Class (Teacher Only)
-router.post('/create', authenticate, requireRole('TEACHER'), createClassroom);
+// Teacher: create classroom
+router.post('/create', authenticate, requireRole('TEACHER'), validate(createClassroomSchema), createClassroom);
 
-// Join Class (Student Only)
-router.post('/join', authenticate, requireRole('STUDENT'), joinClassroom);
+// Student: join classroom
+router.post('/join', authenticate, requireRole('STUDENT'), validate(joinClassroomSchema), joinClassroom);
 
-router.put('/:id', authenticate, requireRole('TEACHER'), updateClassroom);
+// Teacher: update / delete classroom
+router.put('/:id',    authenticate, requireRole('TEACHER'), validate(updateClassroomSchema), updateClassroom);
 router.delete('/:id', authenticate, requireRole('TEACHER'), deleteClassroom);
 
 export default router;

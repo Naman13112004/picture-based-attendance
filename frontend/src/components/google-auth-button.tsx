@@ -8,6 +8,7 @@ import { Loader2 } from "lucide-react";
 import api from "@/lib/api";
 import { useAuth } from "@/store/useAuth";
 import Cookies from "js-cookie";
+import { toast } from "sonner";
 
 interface GoogleAuthButtonProps {
   role?: "student" | "teacher"; // Optional: pass role if known (e.g. from register page)
@@ -46,13 +47,13 @@ export function GoogleAuthButton({ role = "student" }: GoogleAuthButtonProps) {
         }
       } catch (error) {
         console.error("Google Login Failed", error);
-        alert("Google Sign-In failed. Please try again.");
+        toast.error("Google Sign-In failed. Please try again.");
       } finally {
         setIsLoading(false);
       }
     },
     onError: () => {
-      alert("Google Login Failed");
+      toast.error("Google Login Failed");
     }
   });
 

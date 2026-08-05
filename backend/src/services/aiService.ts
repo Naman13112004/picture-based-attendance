@@ -9,7 +9,9 @@ import type {
   StudentEmbeddingPayload,
   RecognitionResult,
   RegisterFaceResult,
+  ExtractEmbeddingsResult,
 } from '../types/ai.js';
+
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -62,6 +64,16 @@ function describeAxiosError(err: AxiosError): string {
   }
   return err.message;
 }
+
+/** BUG-21: Returns true for transient errors that are worth retrying (5xx, network). */
+function isTransientError(err: AxiosError): boolean {
+  if (!err.response) return true;          // No response = network/timeout error
+  return err.response.status >= 500;       // 5xx = server-side transient failure
+  // 4xx = client error, will not self-resolve on retry
+}
+
+/** BUG-21: Sleep helper. */
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -131,20 +143,94 @@ export const recognizeFaces = async (
   classImageBase64: string,
   students: StudentEmbeddingPayload[],
 ): Promise<RecognitionResult> => {
-  try {
-    const response = await axios.post<RecognitionResult>(
-      `${BASE_URL}/recognize`,
-      { class_image_b64: classImageBase64, students },
-      { timeout: RECOGNIZE_TIMEOUT_MS },
-    );
-    return response.data;
-  } catch (err) {
-    const axiosErr = err as AxiosError;
-    if (axios.isAxiosError(axiosErr)) {
-      const description = describeAxiosError(axiosErr);
-      console.error(`[AI Service] recognize failed: ${description}`);
-      throw new Error(`AI service error during recognition: ${description}`);
+  // BUG-21: One retry for transient failures (5xx / network timeout).
+  // 4xx errors are not retried — they indicate a client problem that won't resolve.
+  const MAX_ATTEMPTS = 2;
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await axios.post<RecognitionResult>(
+        `${BASE_URL}/recognize`,
+        { class_image_b64: classImageBase64, students },
+        { timeout: RECOGNIZE_TIMEOUT_MS },
+      );
+      return response.data;
+    } catch (err) {
+      const axiosErr = err as AxiosError;
+      if (axios.isAxiosError(axiosErr)) {
+        const description = describeAxiosError(axiosErr);
+        if (attempt < MAX_ATTEMPTS && isTransientError(axiosErr)) {
+          console.warn(
+            `[AI Service] recognize attempt ${attempt} failed (${description}). Retrying in 1s...`,
+          );
+          await sleep(1000);
+          lastError = new Error(`AI service error during recognition: ${description}`);
+          continue;
+        }
+        console.error(`[AI Service] recognize failed: ${description}`);
+        throw new Error(`AI service error during recognition: ${description}`);
+      }
+      throw err;
     }
-    throw err;
   }
+
+  // Should not reach here, but TypeScript needs a return path
+  throw lastError ?? new Error('AI service recognition failed after retries.');
 };
+
+/**
+ * Call POST /extract-embeddings to detect all faces in a classroom photo and
+ * return their 128-D embeddings — WITHOUT performing any student matching.
+ *
+ * This is the Phase 5 pgvector path. The worker calls this endpoint to get
+ * the raw face embeddings, then matches them against enrolled students using
+ * a pgvector cosine-distance query directly in PostgreSQL (HNSW index).
+ *
+ * Advantages over /recognize:
+ *   - Payload is O(faces × 128) instead of O(students × faces × 128).
+ *   - No student data ever leaves the database tier.
+ *   - Matching scales with the DB, not with Python worker concurrency.
+ *
+ * @param classImageBase64  Base64-encoded classroom photo (data URI optional).
+ * @returns                 List of 128-D float arrays, one per detected face.
+ *                          Empty array if no faces are detected.
+ * @throws                  Re-throws on network failure or 5xx after one retry
+ *                          so the worker can propagate the error and retry the job.
+ */
+export const extractFaceEmbeddings = async (
+  classImageBase64: string,
+): Promise<ExtractEmbeddingsResult> => {
+  const MAX_ATTEMPTS = 2;
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await axios.post<ExtractEmbeddingsResult>(
+        `${BASE_URL}/extract-embeddings`,
+        { class_image_b64: classImageBase64 },
+        { timeout: RECOGNIZE_TIMEOUT_MS },
+      );
+      return response.data;
+    } catch (err) {
+      const axiosErr = err as AxiosError;
+      if (axios.isAxiosError(axiosErr)) {
+        const description = describeAxiosError(axiosErr);
+        if (attempt < MAX_ATTEMPTS && isTransientError(axiosErr)) {
+          console.warn(
+            `[AI Service] extract-embeddings attempt ${attempt} failed (${description}). Retrying in 1s...`,
+          );
+          await sleep(1000);
+          lastError = new Error(`AI service error during extraction: ${description}`);
+          continue;
+        }
+        console.error(`[AI Service] extract-embeddings failed: ${description}`);
+        throw new Error(`AI service error during extraction: ${description}`);
+      }
+      throw err;
+    }
+  }
+
+  throw lastError ?? new Error('AI service extraction failed after retries.');
+};
+
