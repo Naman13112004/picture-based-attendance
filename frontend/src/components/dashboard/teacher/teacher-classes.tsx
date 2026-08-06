@@ -25,6 +25,7 @@ import {
     Copy,
     Loader2
 } from "lucide-react";
+import { toast } from "sonner";
 
 import Link from "next/link";
 import api from "@/lib/api";
@@ -64,7 +65,7 @@ const TeacherClasses = () => {
     // 2. Actions
     const copyCode = (code: string) => {
         navigator.clipboard.writeText(code);
-        alert("Class code copied to clipboard!");
+        toast.success("Class code copied to clipboard!");
     }
 
     const handleCreate = async (name: string) => {
@@ -83,8 +84,9 @@ const TeacherClasses = () => {
             try {
                 await api.delete(`/classrooms/${id}`);
                 fetchClasses();
+                toast.success("Class deleted successfully");
             } catch (error) {
-                alert("Failed to delete class");
+                toast.error("Failed to delete class");
             }
         }
     }

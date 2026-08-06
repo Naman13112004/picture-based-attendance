@@ -23,7 +23,6 @@ import requests
 
 from config import IMAGE_DOWNLOAD_TIMEOUT
 
-
 # Matches optional data URI prefix: data:image/jpeg;base64,<data>
 _DATA_URI_RE = re.compile(r"^data:[^;]+;base64,", re.IGNORECASE)
 

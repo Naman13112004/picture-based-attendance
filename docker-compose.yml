@@ -1,4 +1,7 @@
 services:
+  # ---------------------------------------------------------------------------
+  # Local PostgreSQL (used only for local development without Neon)
+  # ---------------------------------------------------------------------------
   postgres:
     image: postgres:15-alpine
     environment:
@@ -16,6 +19,9 @@ services:
       timeout: 5s
       retries: 5
 
+  # ---------------------------------------------------------------------------
+  # Node.js API server
+  # ---------------------------------------------------------------------------
   backend:
     build:
       context: ./backend
@@ -25,12 +31,15 @@ services:
       - PORT=5000
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-snapattend}
       - JWT_SECRET=${JWT_SECRET}
-      - PYTHON_API_URL=http://ai-service:8000/recognize
+      - PYTHON_API_BASE_URL=http://ai-service:8000
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       - SUPABASE_BUCKET=${SUPABASE_BUCKET}
+      - CLASSROOM_PHOTOS_BUCKET=${CLASSROOM_PHOTOS_BUCKET:-classroom-photos}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      # Upstash Redis URL — set this to your Upstash rediss:// connection string
+      - REDIS_URL=${REDIS_URL}
     ports:
       - "5000:5000"
     depends_on:
@@ -38,6 +47,42 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # BullMQ Worker — same image as backend, different entrypoint
+  # Consumes jobs from the "attendance" BullMQ queue and calls the AI service.
+  # Can be scaled horizontally: `docker-compose up --scale worker=3`
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: snapattend-backend:latest
+    # Override the default CMD to run the worker entry point instead of the API.
+    command: ["node", "dist/worker/index.js"]
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-snapattend}
+      - PYTHON_API_BASE_URL=http://ai-service:8000
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      # Upstash Redis URL — same as the backend
+      - REDIS_URL=${REDIS_URL}
+      # AI service timeouts (worker can afford longer timeouts than the API)
+      - AI_RECOGNIZE_TIMEOUT_MS=${AI_RECOGNIZE_TIMEOUT_MS:-90000}
+      - AI_REGISTER_TIMEOUT_MS=${AI_REGISTER_TIMEOUT_MS:-30000}
+      # Number of jobs the worker processes in parallel (default: 1)
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-1}
+      # pgvector cosine distance threshold (0=identical, 2=opposite; default 0.5)
+      - PGVECTOR_SIMILARITY_THRESHOLD=${PGVECTOR_SIMILARITY_THRESHOLD:-0.5}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy   # Wait for /ready probe, not just process start
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Next.js frontend
+  # ---------------------------------------------------------------------------
   frontend:
     build:
       context: ./frontend
@@ -53,6 +98,9 @@ services:
       - backend
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # FastAPI AI service (face detection + recognition)
+  # ---------------------------------------------------------------------------
   ai-service:
     build:
       context: ./ai-service
@@ -63,6 +111,14 @@ services:
     volumes:
       - ai-models:/app/models
     restart: unless-stopped
+    healthcheck:
+      # Use /ready (Phase 6) — returns 503 until YuNet+SFace models are loaded.
+      # This prevents the worker from sending jobs before inference is available.
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/ready || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 60s   # Allow time for model download on first run
 
 volumes:
   pgdata:

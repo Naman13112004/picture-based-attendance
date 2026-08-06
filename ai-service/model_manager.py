@@ -107,3 +107,14 @@ def get_recognizer() -> cv2.FaceRecognizerSF:
     if _recognizer is None:
         raise RuntimeError("Models not initialized. Call initialize_models() first.")
     return _recognizer
+
+
+def is_models_ready() -> bool:
+    """
+    Return True if both models have been successfully initialized.
+
+    Used by:
+    - GET /ready  — readiness probe (returns 503 if False)
+    - Every inference endpoint — guard against serving requests during cold start.
+    """
+    return _detector is not None and _recognizer is not None

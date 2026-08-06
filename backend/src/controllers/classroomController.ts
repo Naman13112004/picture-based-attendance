@@ -1,7 +1,10 @@
 import type { Response } from 'express';
 import type { AuthRequest } from '../middlewares/authMiddleware.js';
 import db from '../config/db.js';
-import { nanoid } from 'nanoid'; // You might need: npm install nanoid
+import { customAlphabet } from 'nanoid';  // BUG-20: unambiguous alphabet
+
+// BUG-20: remove 0/O, I/1/l that are hard to distinguish when read aloud
+const nanoid = customAlphabet('23456789ABCDEFGHJKLMNPQRSTUVWXYZ', 6);
 
 export const createClassroom = async (req: AuthRequest, res: Response) => {
   try {
@@ -52,14 +55,21 @@ export const joinClassroom = async (req: AuthRequest, res: Response) => {
     const studentProfile = await db.studentProfile.findUnique({ where: { userId: studentId } });
     if (!studentProfile) return res.status(400).json({ message: 'Profile not found' });
 
-    // Connect Student to Class (Many-to-Many via Prisma implicit relation logic)
+    // BUG-08: Check if already enrolled before connecting
+    const alreadyEnrolled = await db.studentProfile.findFirst({
+      where: {
+        id: studentProfile.id,
+        classrooms: { some: { id: classroom.id } },
+      },
+    });
+    if (alreadyEnrolled) {
+      return res.status(409).json({ message: 'You are already enrolled in this classroom.' });
+    }
+
+    // Connect Student to Class
     await db.studentProfile.update({
       where: { id: studentProfile.id },
-      data: {
-        classrooms: {
-          connect: { id: classroom.id }
-        }
-      }
+      data: { classrooms: { connect: { id: classroom.id } } },
     });
 
     res.json({ message: `Successfully joined ${classroom.name}` });

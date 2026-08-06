@@ -16,14 +16,27 @@ interface CameraModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCapture: (imageDataUrl: string) => void;
+  mode?: "student-registration" | "teacher-attendance";
+  uploadProgress?: number;
 }
 
-export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
+export function CameraModal({ 
+  isOpen, 
+  onClose, 
+  onCapture, 
+  mode = "student-registration",
+  uploadProgress 
+}: CameraModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [error, setError] = useState<string>("");
+  const [facingMode, setFacingMode] = useState<"user" | "environment">(
+    mode === "teacher-attendance" ? "environment" : "user"
+  );
+  const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
+  const [isCompressing, setIsCompressing] = useState(false);
 
   // Start camera when modal opens
   useEffect(() => {
@@ -40,11 +53,27 @@ export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
   }, [isOpen]);
 
 
+  useEffect(() => {
+    // Check for multiple cameras
+    const checkCameras = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoInputs = devices.filter(device => device.kind === "videoinput");
+        if (videoInputs.length > 1) {
+          setHasMultipleCameras(true);
+        }
+      } catch (err) {
+        console.error("Error enumerating devices:", err);
+      }
+    };
+    checkCameras();
+  }, []);
+
   const startCamera = async () => {
     setError("");
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: 640, height: 480 }
+        video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } }
       });
       setStream(mediaStream);
       if (videoRef.current) {
@@ -62,6 +91,15 @@ export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
       setStream(null);
     }
   }, [stream]);
+
+  const toggleCamera = () => {
+    stopCamera();
+    setFacingMode(prev => prev === "user" ? "environment" : "user");
+    // setTimeout to ensure state updates and stream stops before restarting
+    setTimeout(() => {
+      if (isOpen && !capturedImage) startCamera();
+    }, 100);
+  };
 
   const takePhoto = () => {
     if (videoRef.current && canvasRef.current) {
@@ -90,10 +128,54 @@ export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
     startCamera();
   };
 
-  const handleConfirm = () => {
+  const compressImage = (dataUrl: string, maxWidth: number, quality: number): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        } else {
+          resolve(dataUrl);
+        }
+      };
+      img.src = dataUrl;
+    });
+  };
+
+  const handleConfirm = async () => {
     if (capturedImage) {
-      onCapture(capturedImage);
-      handleClose();
+      setIsCompressing(true);
+      try {
+        let finalImage = capturedImage;
+        if (mode === "teacher-attendance") {
+          // Compress to max 1280px wide, 0.85 quality
+          finalImage = await compressImage(capturedImage, 1280, 0.85);
+        }
+        onCapture(finalImage);
+        // Do not handleClose() immediately if we show upload progress
+        if (uploadProgress === undefined) {
+           handleClose();
+        }
+      } catch (err) {
+        console.error("Compression error", err);
+        onCapture(capturedImage);
+        if (uploadProgress === undefined) handleClose();
+      } finally {
+        setIsCompressing(false);
+      }
     }
   };
 
@@ -107,9 +189,13 @@ export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Take Reference Photo</DialogTitle>
+          <DialogTitle>
+            {mode === "teacher-attendance" ? "Take Classroom Photo" : "Take Reference Photo"}
+          </DialogTitle>
           <DialogDescription>
-            Ensure your face is clearly visible and well-lit.
+            {mode === "teacher-attendance" 
+              ? "Ensure all students are clearly visible and well-lit."
+              : "Ensure your face is clearly visible and well-lit."}
           </DialogDescription>
         </DialogHeader>
 
@@ -121,22 +207,49 @@ export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
 
           {!capturedImage ? (
             // Live Video Feed
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="rounded-lg w-full h-auto max-h-100 object-cover"
-              onLoadedMetadata={() => videoRef.current?.play()}
-            />
+            <div className="relative w-full">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className={`rounded-lg w-full h-auto max-h-100 object-cover ${facingMode === "user" ? "transform scale-x-[-1]" : ""}`}
+                onLoadedMetadata={() => videoRef.current?.play()}
+              />
+              {hasMultipleCameras && (
+                <Button 
+                  variant="secondary" 
+                  size="icon"
+                  className="absolute bottom-4 right-4 rounded-full opacity-80 hover:opacity-100 cursor-pointer"
+                  onClick={toggleCamera}
+                >
+                  <RotateCcw className="h-5 w-5" />
+                </Button>
+              )}
+            </div>
           ) : (
             // Captured Image Preview
-
-            <img
-              src={capturedImage}
-              alt="Captured"
-              className="rounded-lg w-full h-auto max-h-100 object-cover transform scale-x-[-1]"
-            />
+            <div className="relative w-full">
+              <img
+                src={capturedImage}
+                alt="Captured"
+                className={`rounded-lg w-full h-auto max-h-100 object-cover ${facingMode === "user" ? "transform scale-x-[-1]" : ""}`}
+              />
+              
+              {uploadProgress !== undefined && (
+                <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-lg z-10">
+                  <div className="w-3/4 max-w-xs space-y-2 text-center">
+                    <p className="font-medium">Uploading...</p>
+                    <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-primary transition-all duration-300"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -147,11 +260,21 @@ export function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
             </Button>
           ) : (
             <div className="flex gap-2 w-full justify-end">
-              <Button variant="outline" onClick={handleRetake} className="cursor-pointer">
+              <Button 
+                variant="outline" 
+                onClick={handleRetake} 
+                className="cursor-pointer"
+                disabled={uploadProgress !== undefined || isCompressing}
+              >
                 <RotateCcw className="mr-2 h-4 w-4" /> Retake
               </Button>
-              <Button onClick={handleConfirm} className="cursor-pointer">
-                <Check className="mr-2 h-4 w-4" /> Confirm
+              <Button 
+                onClick={handleConfirm} 
+                className="cursor-pointer"
+                disabled={uploadProgress !== undefined || isCompressing}
+              >
+                <Check className="mr-2 h-4 w-4" /> 
+                {isCompressing ? "Processing..." : "Confirm"}
               </Button>
             </div>
           )}

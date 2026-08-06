@@ -43,3 +43,11 @@ next-env.d.ts
 # PWA generated files
 public/sw.js
 public/workbox-*.js
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/

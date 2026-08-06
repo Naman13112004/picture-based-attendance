@@ -30,6 +30,7 @@ Traditional attendance systemsâ€”like roll calls, RFID cards, or sign-in sheetsâ
 
 - **Frontend**: Next.js (React), Tailwind CSS, Zustand
 - **Backend API**: Node.js, Express, Prisma ORM, PostgreSQL
+- **Queue & Workers**: BullMQ, Redis (Upstash)
 - **AI Service**: Python, FastAPI, OpenCV DNN (YuNet, SFace)
 - **Storage/Auth**: Supabase (PostgreSQL + Buckets)
 
@@ -52,16 +53,21 @@ graph TD
     Client[Web Browser - Next.js]
     Backend[Node.js / Express API]
     DB[(PostgreSQL / Prisma)]
+    Redis[(Redis / Upstash)]
+    Worker[Node.js / BullMQ Worker]
     AI[Python FastAPI / Face Recognition]
     Storage[Supabase Storage Buckets]
 
     Client -- Uploads group photo --> Backend
     Backend -- Saves metadata --> DB
     Backend -- Uploads image --> Storage
-    Backend -- Sends photo URL + Enrolled Students --> AI
+    Backend -- Adds Job to Queue --> Redis
+    Redis -- Fetches Job --> Worker
+    Worker -- Sends photo URL + Enrolled Students --> AI
     AI -- Downloads references --> Storage
-    AI -- Returns Present/Absent list --> Backend
-    Backend -- Returns results to UI --> Client
+    AI -- Returns Present/Absent list --> Worker
+    Worker -- Updates DB --> DB
+    Worker -- Emits SSE --> Client
 ```
 
 ---
@@ -86,9 +92,10 @@ picture-based-attendance/
 We have provided a unified script to install dependencies across all three services.
 
 ### Prerequisites
-- Node.js (v18+)
+- Node.js (v24+)
 - Python (v3.10+)
 - PostgreSQL (or a Neon/Supabase DB URL)
+- Redis (or Upstash Redis URL)
 
 
 ### Step 1: Clone the Repository

@@ -4,20 +4,16 @@ import type { AuthRequest } from '../middlewares/authMiddleware.js';
 import db from '../config/db.js';
 import { recognizeFaces } from '../services/aiService.js';
 import type { StudentEmbeddingPayload } from '../types/ai.js';
+import { saveClassroomImage } from '../utils/fileHelper.js';
+import { enqueueAttendanceJob } from '../queues/attendanceQueue.js';
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers  (shared internally — unchanged from original)
 // ---------------------------------------------------------------------------
 
 /**
  * Safely parse the faceEmbedding JSONB column into a typed number[][].
- *
- * Prisma returns Json columns as `unknown`. This function validates the
- * structure at runtime so the rest of the controller can work with a
- * well-typed value without unsafe casts everywhere.
- *
- * Returns null if the value is absent, structurally wrong, or contains
- * vectors of unexpected dimension.
+ * Returns null if the value is absent, structurally wrong, or wrong dimension.
  */
 function parseFaceEmbedding(raw: unknown): number[][] | null {
   if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
@@ -30,48 +26,55 @@ function parseFaceEmbedding(raw: unknown): number[][] | null {
   return valid ? (raw as number[][]) : null;
 }
 
+/**
+ * Convert a YYYY-MM-DD string (teacher's local date) to a UTC midnight Date.
+ * This is the canonical form stored in the DB so the unique constraint
+ * @@unique([studentId, classId, date]) works per calendar day.
+ */
+function toUtcMidnight(dateStr: string): Date {
+  const [year, month, day] = dateStr.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+}
+
+/** Today's UTC date as YYYY-MM-DD — fallback when the client omits `date`. */
+function todayUtcDateString(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 // ---------------------------------------------------------------------------
-// markAttendance — the primary optimized hot-path
+// markAttendance  ← ASYNC (Phase 3 refactor)
 // ---------------------------------------------------------------------------
 
 /**
  * POST /api/attendance/mark
  *
- * Takes a classroom photo and marks attendance for all enrolled students.
+ * Accepts a classroom photo and returns immediately (HTTP 202) after:
+ *   1. Validating the payload and classroom ownership.
+ *   2. Checking for an existing active job (duplicate guard).
+ *   3. Uploading the classroom photo to Supabase (classroom-photos bucket).
+ *   4. Creating an AttendanceJob row in PostgreSQL with status QUEUED.
+ *   5. Enqueuing the job in BullMQ for the worker to process asynchronously.
  *
- * Optimized pipeline (vs original):
- *  ┌─ OLD ──────────────────────────────────────────────────────────────────┐
- *  │  1. Save class photo to Supabase                                       │
- *  │  2. FastAPI downloads class photo from Supabase                        │
- *  │  3. For each student: download 3 reference images, detect faces,       │
- *  │     compute 3 embeddings                                               │
- *  │  4. Nested Python loop: O(students × class_faces) comparisons          │
- *  │  5. N sequential Prisma INSERT calls                                   │
- *  └────────────────────────────────────────────────────────────────────────┘
- *  ┌─ NEW ──────────────────────────────────────────────────────────────────┐
- *  │  1. Read pre-computed embeddings from DB (zero inference, zero I/O)    │
- *  │  2. Forward class photo as Base64 directly to FastAPI                  │
- *  │  3. FastAPI decodes in memory, runs one NumPy matrix multiply          │
- *  │  4. ONE createMany() call — all inserts in a single DB round trip      │
- *  └────────────────────────────────────────────────────────────────────────┘
+ * The caller receives a `jobId` immediately and should poll
+ * GET /api/attendance/job/:jobId/stream (SSE) for real-time status updates.
  *
- * Edge cases handled:
- *  - classId or image missing → 400
- *  - Classroom not found → 404
- *  - No students enrolled → 200 with empty results
- *  - Students with missing embeddings → 200 with explicit warning list
- *  - AI service unreachable → 503
- *  - AI service returns bad payload → 502
- *  - createMany failure → 500 with rollback via transaction
+ * HTTP Responses:
+ *   202  — Job accepted and queued.
+ *   400  — Missing or invalid payload.
+ *   403  — Teacher does not own the classroom.
+ *   404  — Classroom not found.
+ *   409  — An active job already exists for this classroom + date.
+ *   500  — Server-side error (upload, DB, or queue failure).
  */
 export const markAttendance = async (req: AuthRequest, res: Response) => {
   try {
-    const { classId, image } = req.body as {
+    const { classId, image, date } = req.body as {
       classId?: unknown;
-      image?: unknown;
+      image?:   unknown;
+      date?:    unknown;
     };
 
-    // ── Validate payload ─────────────────────────────────────────────────────
+    // ── Validate payload ──────────────────────────────────────────────────────
     if (typeof classId !== 'string' || !classId.trim()) {
       return res.status(400).json({ message: 'classId is required.' });
     }
@@ -81,120 +84,105 @@ export const markAttendance = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // ── Step 1: Load classroom and ALL enrolled students with their embeddings
-    // We select only what we need — no image URLs, no unnecessary fields.
-    const classroom = await db.classroom.findUnique({
-      where: { id: classId },
-      include: {
-        students: {
-          select: {
-            userId: true,
-            faceEmbedding: true,
-          },
-        },
-      },
-    });
+    // Resolve date: use client-supplied YYYY-MM-DD or fall back to today UTC
+    const dateStr =
+      typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
+        ? date
+        : todayUtcDateString();
+
+    // ── Step 1: Load classroom + verify ownership ─────────────────────────────
+    const classroom = await db.classroom.findUnique({ where: { id: classId } });
 
     if (!classroom) {
       return res.status(404).json({ message: 'Classroom not found.' });
     }
-
-    if (classroom.students.length === 0) {
-      return res.status(200).json({
-        message: 'No students enrolled in this classroom.',
-        results: {
-          total_faces_detected: 0,
-          present_student_ids: [],
-          absent_count: 0,
-        },
+    if (classroom.teacherId !== req.user!.userId) {
+      return res.status(403).json({
+        message: 'You do not have permission to mark attendance for this classroom.',
       });
     }
 
-    // ── Step 2: Partition students by embedding availability ─────────────────
-    const studentsWithEmbeddings: StudentEmbeddingPayload[] = [];
-    const studentIdsWithoutEmbeddings: string[] = [];
-
-    for (const student of classroom.students) {
-      const embeddings = parseFaceEmbedding(student.faceEmbedding);
-      if (embeddings !== null) {
-        studentsWithEmbeddings.push({ id: student.userId, embeddings });
-      } else {
-        studentIdsWithoutEmbeddings.push(student.userId);
-      }
-    }
-
-    if (studentIdsWithoutEmbeddings.length > 0) {
-      console.warn(
-        `[Attendance] ${studentIdsWithoutEmbeddings.length} student(s) have no ` +
-        `embeddings in class ${classId}: [${studentIdsWithoutEmbeddings.join(', ')}]`,
-      );
-    }
-
-    // ── Step 3: Call AI service (only if there are students to match) ────────
-    let aiResult = {
-      total_faces_detected: 0,
-      present_student_ids: [] as string[],
-      absent_count: studentsWithEmbeddings.length,
-    };
-
-    if (studentsWithEmbeddings.length > 0) {
-      try {
-        // The class image is forwarded as Base64 — it is decoded in memory
-        // by FastAPI and never touches disk or any storage service.
-        aiResult = await recognizeFaces(image, studentsWithEmbeddings);
-      } catch (aiError) {
-        console.error('[Attendance] AI service call failed:', aiError);
-        return res.status(503).json({
-          message:
-            'The AI recognition service is currently unavailable. ' +
-            'Please try again in a moment.',
-        });
-      }
-    }
-
-    const presentSet = new Set(aiResult.present_student_ids);
-    const today = new Date();
-
-    // ── Step 4: Build attendance array for ALL enrolled students ─────────────
-    // Students without embeddings are always marked ABSENT (they cannot be
-    // recognized), and appear in the `students_without_embeddings` warning.
-    const allStudentIds = classroom.students.map((s) => s.userId);
-
-    const attendanceData = allStudentIds.map((studentId) => ({
-      date: today,
-      status: presentSet.has(studentId) ? ('PRESENT' as const) : ('ABSENT' as const),
-      studentId,
-      classId,
-    }));
-
-    // ── Step 5: Single bulk INSERT — replaces N sequential Prisma calls ──────
-    await db.$transaction(async (tx) => {
-      await tx.attendance.createMany({
-        data: attendanceData,
-        skipDuplicates: true,
-      });
+    // ── Step 2: Duplicate-job guard ───────────────────────────────────────────
+    // Reject if a non-terminal job already exists for this (classId, date) pair.
+    // FAILED and DEAD jobs are excluded so that a teacher can retry a failed attempt.
+    const existingJob = await db.attendanceJob.findFirst({
+      where: {
+        classId,
+        date:   dateStr,
+        status: { notIn: ['FAILED', 'DEAD'] },
+      },
+      select: { id: true, status: true },
     });
 
-    // ── Step 6: Build response with warnings ─────────────────────────────────
-    const responseBody: Record<string, unknown> = {
-      message: 'Attendance marked successfully.',
-      results: {
-        total_faces_detected: aiResult.total_faces_detected,
-        present_student_ids: aiResult.present_student_ids,
-        absent_count:
-          classroom.students.length - aiResult.present_student_ids.length,
-      },
-    };
-
-    if (studentIdsWithoutEmbeddings.length > 0) {
-      responseBody['warning'] =
-        `${studentIdsWithoutEmbeddings.length} enrolled student(s) have no registered ` +
-        `face embeddings and were automatically marked absent. ` +
-        `Ask them to re-upload their face photos.`;
-      responseBody['students_without_embeddings'] = studentIdsWithoutEmbeddings;
+    if (existingJob) {
+      const statusLabel = existingJob.status.toLowerCase();
+      return res.status(409).json({
+        message:
+          `Attendance for ${dateStr} is already ${statusLabel} for this classroom. ` +
+          (existingJob.status === 'COMPLETED'
+            ? 'Use "Manual Attendance" to make corrections.'
+            : 'Check the existing job status.'),
+        jobId:  existingJob.id,
+        status: existingJob.status,
+      });
     }
 
-    return res.status(200).json(responseBody);
+    // ── Step 3: Upload classroom photo to Supabase ────────────────────────────
+    // Store the image in the classroom-photos bucket before enqueueing so
+    // the worker can download it without keeping the large base64 payload in Redis.
+    let imageUrl: string;
+    try {
+      // Filename: classrooms/<classId>/<YYYY-MM-DD>-<epoch>.jpg
+      // The epoch suffix prevents collisions on the same day (retries, etc.).
+      const filename = `${dateStr}-${Date.now()}.jpg`;
+      imageUrl = await saveClassroomImage(image, classId, filename);
+    } catch (uploadErr) {
+      console.error('[Attendance] Supabase upload failed:', uploadErr);
+      return res.status(500).json({
+        message:
+          'Failed to upload the classroom photo. Please try again.',
+      });
+    }
+
+    // ── Step 4: Create AttendanceJob row in DB ────────────────────────────────
+    const attendanceJob = await db.attendanceJob.create({
+      data: {
+        classId,
+        teacherId: req.user!.userId,
+        imageUrl,
+        date:      dateStr,
+        status:    'QUEUED',
+      },
+    });
+
+    // ── Step 5: Enqueue into BullMQ ───────────────────────────────────────────
+    try {
+      await enqueueAttendanceJob({
+        jobDbId:   attendanceJob.id,
+        classId,
+        teacherId: req.user!.userId,
+        date:      dateStr,
+      });
+    } catch (queueErr) {
+      // Queue failure: clean up the DB row so the teacher can retry immediately.
+      await db.attendanceJob
+        .delete({ where: { id: attendanceJob.id } })
+        .catch(() => void 0); // best-effort cleanup
+      console.error('[Attendance] BullMQ enqueue failed:', queueErr);
+      return res.status(503).json({
+        message:
+          'The queue service is unavailable. ' +
+          'Check REDIS_URL configuration and try again.',
+      });
+    }
+
+    // ── Return 202 Accepted ───────────────────────────────────────────────────
+    return res.status(202).json({
+      message: 'Attendance processing has started. Track progress via the job stream.',
+      jobId:   attendanceJob.id,
+      status:  'QUEUED',
+      date:    dateStr,
+    });
 
   } catch (error) {
     console.error('[Attendance] markAttendance error:', error);
@@ -203,7 +191,220 @@ export const markAttendance = async (req: AuthRequest, res: Response) => {
 };
 
 // ---------------------------------------------------------------------------
-// getStudentStats — unchanged, kept intact
+// getJobStatus  ← NEW (Phase 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/attendance/job/:jobId
+ *
+ * Returns the current state of an AttendanceJob.
+ * Protected by authenticate + requireRole('TEACHER').
+ * The requesting teacher must own the job (teacherId === req.user.userId).
+ *
+ * HTTP Responses:
+ *   200  — Job found; returns id, status, attempts, lastError, result, date.
+ *   403  — Teacher does not own this job.
+ *   404  — Job not found.
+ */
+export const getJobStatus = async (req: AuthRequest, res: Response) => {
+  try {
+    const { jobId } = req.params;
+
+    if (!jobId || typeof jobId !== 'string') {
+      return res.status(400).json({ message: 'jobId is required.' });
+    }
+
+    const job = await db.attendanceJob.findUnique({
+      where: { id: jobId },
+      select: {
+        id:         true,
+        classId:    true,
+        teacherId:  true,
+        date:       true,
+        status:     true,
+        attempts:   true,
+        maxAttempts: true,
+        lastError:  true,
+        result:     true,
+        createdAt:  true,
+        updatedAt:  true,
+      },
+    });
+
+    if (!job) {
+      return res.status(404).json({ message: 'Job not found.' });
+    }
+
+    if (job.teacherId !== req.user!.userId) {
+      return res.status(403).json({
+        message: 'You do not have permission to view this job.',
+      });
+    }
+
+    return res.json(job);
+
+  } catch (error) {
+    console.error('[Attendance] getJobStatus error:', error);
+    return res.status(500).json({ message: 'Failed to fetch job status.' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// streamJobStatus  ← NEW (Phase 3)  — Server-Sent Events
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/attendance/job/:jobId/stream
+ *
+ * Server-Sent Events (SSE) endpoint that pushes real-time AttendanceJob status
+ * updates to the teacher's browser until the job reaches a terminal state
+ * (COMPLETED, FAILED, or DEAD) or the connection times out after 60 s.
+ *
+ * SSE event format:
+ *   data: {"type":"status","status":"PROCESSING","attempts":1,"lastError":null,"result":null}
+ *
+ * Terminal event (connection closed after sending):
+ *   data: {"type":"status","status":"COMPLETED","result":{...}}
+ *
+ * Timeout event:
+ *   data: {"type":"timeout","message":"..."}
+ *
+ * Protected by authenticate + requireRole('TEACHER').
+ * The requesting teacher must own the job.
+ *
+ * Notes for production:
+ *   - Set `X-Accel-Buffering: no` so Nginx doesn't buffer the stream.
+ *   - The client should handle reconnection if the TCP connection drops.
+ */
+export const streamJobStatus = async (req: AuthRequest, res: Response) => {
+  const { jobId } = req.params;
+
+  // ── Pre-flight: verify job & ownership before opening the stream ──────────
+  // (Returning JSON errors here is fine because headers haven't been sent yet.)
+  if (!jobId || typeof jobId !== 'string') {
+    return res.status(400).json({ message: 'jobId is required.' });
+  }
+
+  let initialJob: Awaited<ReturnType<typeof db.attendanceJob.findUnique>>;
+  try {
+    initialJob = await db.attendanceJob.findUnique({ where: { id: jobId } });
+  } catch {
+    return res.status(500).json({ message: 'Failed to fetch job.' });
+  }
+
+  if (!initialJob) {
+    return res.status(404).json({ message: 'Job not found.' });
+  }
+  if (initialJob.teacherId !== req.user!.userId) {
+    return res.status(403).json({
+      message: 'You do not have permission to stream this job.',
+    });
+  }
+
+  // ── SSE setup ─────────────────────────────────────────────────────────────
+  res.setHeader('Content-Type',     'text/event-stream');
+  res.setHeader('Cache-Control',    'no-cache');
+  res.setHeader('Connection',       'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable Nginx/proxy buffering
+  res.flushHeaders();
+
+  const TERMINAL = new Set(['COMPLETED', 'FAILED', 'DEAD']);
+  const POLL_MS  = 2_000;  // poll every 2 s
+  const MAX_MS   = 60_000; // close after 60 s regardless
+
+  let closed = false;
+
+  /** Write a JSON SSE event and flush. */
+  const send = (payload: Record<string, unknown>): void => {
+    if (closed) return;
+    try {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    } catch {
+      closed = true;
+    }
+  };
+
+  let pollTimer:    ReturnType<typeof setInterval>  | null = null;
+  let timeoutTimer: ReturnType<typeof setTimeout>   | null = null;
+
+  const teardown = () => {
+    closed = true;
+    if (pollTimer)    clearInterval(pollTimer);
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    pollTimer    = null;
+    timeoutTimer = null;
+  };
+
+  // Clean up when client disconnects (tab close, network drop, etc.)
+  req.on('close', () => {
+    teardown();
+  });
+
+  // ── Send initial status immediately ──────────────────────────────────────
+  send({
+    type:      'status',
+    status:    initialJob.status,
+    attempts:  initialJob.attempts,
+    lastError: initialJob.lastError,
+    result:    initialJob.result,
+  });
+
+  // If already terminal, close immediately.
+  if (TERMINAL.has(initialJob.status)) {
+    teardown();
+    res.end();
+    return;
+  }
+
+  // ── Start polling ─────────────────────────────────────────────────────────
+  pollTimer = setInterval(async () => {
+    if (closed) return;
+
+    let job: Awaited<ReturnType<typeof db.attendanceJob.findUnique>>;
+    try {
+      job = await db.attendanceJob.findUnique({ where: { id: jobId } });
+    } catch {
+      send({ type: 'error', message: 'Failed to fetch job status.' });
+      teardown();
+      res.end();
+      return;
+    }
+
+    if (!job) {
+      send({ type: 'error', message: 'Job no longer exists.' });
+      teardown();
+      res.end();
+      return;
+    }
+
+    send({
+      type:      'status',
+      status:    job.status,
+      attempts:  job.attempts,
+      lastError: job.lastError,
+      result:    job.result,
+    });
+
+    if (TERMINAL.has(job.status)) {
+      teardown();
+      res.end();
+    }
+  }, POLL_MS);
+
+  // ── Safety timeout ────────────────────────────────────────────────────────
+  timeoutTimer = setTimeout(() => {
+    if (closed) return;
+    send({
+      type:    'timeout',
+      message: 'Stream closed after 60 s. Poll GET /api/attendance/job/:jobId for the final status.',
+    });
+    teardown();
+    res.end();
+  }, MAX_MS);
+};
+
+// ---------------------------------------------------------------------------
+// getStudentStats  — UNCHANGED
 // ---------------------------------------------------------------------------
 
 export const getStudentStats = async (req: AuthRequest, res: Response) => {
@@ -216,52 +417,38 @@ export const getStudentStats = async (req: AuthRequest, res: Response) => {
 
     const studentProfile = await db.studentProfile.findUnique({
       where: { userId: studentId },
-      include: {
-        _count: {
-          select: { classrooms: true },
-        },
-      },
+      include: { _count: { select: { classrooms: true } } },
     });
 
     const totalClasses = studentProfile?._count.classrooms ?? 0;
 
-    const allRecords = await db.attendance.findMany({
-      where: { studentId },
-    });
+    const allRecords = await db.attendance.findMany({ where: { studentId } });
 
-    const totalSessions = allRecords.length;
+    const totalSessions   = allRecords.length;
     const presentSessions = allRecords.filter((r) => r.status === 'PRESENT').length;
 
     const attendancePercentage =
       totalSessions > 0 ? Math.round((presentSessions / totalSessions) * 100) : 0;
 
     const recentHistory = await db.attendance.findMany({
-      where: { studentId },
+      where:   { studentId },
       orderBy: { date: 'desc' },
-      take: 5,
-      include: {
-        classroom: {
-          select: { name: true, code: true },
-        },
-      },
+      take:    5,
+      include: { classroom: { select: { name: true, code: true } } },
     });
 
     const formattedHistory = recentHistory.map((record) => ({
-      id: record.id,
-      class: record.classroom.name,
-      date: new Date(record.date).toLocaleDateString('en-US', {
+      id:     record.id,
+      class:  record.classroom.name,
+      date:   new Date(record.date).toLocaleDateString('en-US', {
         month: 'short',
-        day: 'numeric',
-        year: 'numeric',
+        day:   'numeric',
+        year:  'numeric',
       }),
       status: record.status === 'PRESENT' ? 'Present' : 'Absent',
     }));
 
-    return res.json({
-      totalClasses,
-      attendancePercentage,
-      history: formattedHistory,
-    });
+    return res.json({ totalClasses, attendancePercentage, history: formattedHistory });
 
   } catch (error) {
     console.error('[Attendance] getStudentStats error:', error);
@@ -270,40 +457,39 @@ export const getStudentStats = async (req: AuthRequest, res: Response) => {
 };
 
 // ---------------------------------------------------------------------------
-// getClassAttendanceHistory — unchanged, kept intact
+// getClassAttendanceHistory  — UNCHANGED
 // ---------------------------------------------------------------------------
 
+/**
+ * GET /api/attendance/history/:classId?date=YYYY-MM-DD
+ */
 export const getClassAttendanceHistory = async (
   req: AuthRequest,
   res: Response,
 ) => {
   try {
     const { classId } = req.params;
-    const { date } = req.query;
+    const { date }    = req.query;
 
-    if (!date) {
-      return res.status(400).json({ error: 'Date is required.' });
+    if (!date || typeof date !== 'string') {
+      return res.status(400).json({ error: 'date query param is required (YYYY-MM-DD).' });
     }
     if (!classId) {
       return res.status(400).json({ error: 'classId is required.' });
     }
-
-    const searchDate = new Date(date as string);
-    if (isNaN(searchDate.getTime())) {
-      return res.status(400).json({ error: 'Invalid date format.' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
     }
 
-    const startOfDay = new Date(searchDate.setHours(0, 0, 0, 0));
-    const endOfDay = new Date(searchDate.setHours(23, 59, 59, 999));
+    const startOfDay = toUtcMidnight(date);
+    const endOfDay   = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000 - 1);
 
     const classroom = await db.classroom.findUnique({
-      where: { id: classId },
+      where:   { id: classId },
       include: {
         students: {
           include: {
-            user: {
-              select: { id: true, name: true, email: true, avatar: true },
-            },
+            user: { select: { id: true, name: true, email: true, avatar: true } },
           },
         },
       },
@@ -312,31 +498,41 @@ export const getClassAttendanceHistory = async (
     if (!classroom) {
       return res.status(404).json({ error: 'Classroom not found.' });
     }
+    if (classroom.teacherId !== req.user!.userId) {
+      return res.status(403).json({ error: 'You do not have permission to view this classroom.' });
+    }
 
     const attendanceRecords = await db.attendance.findMany({
-      where: {
-        classId,
-        date: { gte: startOfDay, lte: endOfDay },
-      },
+      where:   { classId, date: { gte: startOfDay, lte: endOfDay } },
+      orderBy: { date: 'desc' },
     });
 
+    const latestByStudent = new Map<string, typeof attendanceRecords[0]>();
+    for (const record of attendanceRecords) {
+      if (!latestByStudent.has(record.studentId)) {
+        latestByStudent.set(record.studentId, record);
+      }
+    }
+
     const history = classroom.students.map((profile) => {
-      const record = attendanceRecords.find((r) => r.studentId === profile.user.id);
+      const record = latestByStudent.get(profile.user.id);
       return {
         studentId: profile.user.id,
-        name: profile.user.name,
-        email: profile.user.email,
-        avatar: profile.user.avatar,
-        status: record ? record.status : 'ABSENT',
-        time: record ? record.date : null,
+        name:      profile.user.name,
+        email:     profile.user.email,
+        avatar:    profile.user.avatar,
+        status:    record ? record.status : 'ABSENT',
+        time:      record ? record.date   : null,
       };
     });
 
+    const presentCount = history.filter((h) => h.status === 'PRESENT').length;
+
     return res.json({
-      date: startOfDay,
+      date:          startOfDay,
       totalStudents: classroom.students.length,
-      presentCount: attendanceRecords.filter((r) => r.status === 'PRESENT').length,
-      records: history,
+      presentCount,
+      records:       history,
     });
 
   } catch (error) {
@@ -346,9 +542,12 @@ export const getClassAttendanceHistory = async (
 };
 
 // ---------------------------------------------------------------------------
-// updateManualAttendance — unchanged, kept intact
+// updateManualAttendance  — UNCHANGED
 // ---------------------------------------------------------------------------
 
+/**
+ * PATCH /api/attendance/manual
+ */
 export const updateManualAttendance = async (
   req: AuthRequest,
   res: Response,
@@ -356,55 +555,60 @@ export const updateManualAttendance = async (
   try {
     const { classId, date, updates } = req.body as {
       classId?: unknown;
-      date?: unknown;
+      date?:    unknown;
       updates?: unknown;
     };
 
     if (
       typeof classId !== 'string' ||
-      typeof date !== 'string' ||
+      typeof date    !== 'string' ||
       !Array.isArray(updates)
     ) {
       return res.status(400).json({ error: 'Invalid request data.' });
     }
 
-    const targetDate = new Date(date);
-    if (isNaN(targetDate.getTime())) {
-      return res.status(400).json({ error: 'Invalid date format.' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
     }
 
-    const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
-    const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
+    const classroom = await db.classroom.findUnique({ where: { id: classId } });
+    if (!classroom) {
+      return res.status(404).json({ error: 'Classroom not found.' });
+    }
+    if (classroom.teacherId !== req.user!.userId) {
+      return res.status(403).json({ error: 'You do not have permission to edit this classroom.' });
+    }
+
+    const attendanceDate = toUtcMidnight(date);
+    const dayEnd         = new Date(attendanceDate.getTime() + 24 * 60 * 60 * 1000 - 1);
+
+    const VALID_STATUSES = new Set(['PRESENT', 'ABSENT']);
 
     await db.$transaction(async (tx) => {
       for (const update of updates as Array<{ studentId: string; status: string }>) {
-        if (
-          typeof update.studentId !== 'string' ||
-          typeof update.status !== 'string'
-        ) {
-          continue; // skip malformed entries
-        }
+        if (typeof update.studentId !== 'string' || typeof update.status !== 'string') continue;
+        if (!VALID_STATUSES.has(update.status)) continue;
 
         const existing = await tx.attendance.findFirst({
           where: {
             studentId: update.studentId,
             classId,
-            date: { gte: startOfDay, lte: endOfDay },
+            date: { gte: attendanceDate, lte: dayEnd },
           },
         });
 
         if (existing) {
           await tx.attendance.update({
             where: { id: existing.id },
-            data: { status: update.status as 'PRESENT' | 'ABSENT' },
+            data:  { status: update.status as 'PRESENT' | 'ABSENT' },
           });
         } else {
           await tx.attendance.create({
             data: {
               studentId: update.studentId,
               classId,
-              status: update.status as 'PRESENT' | 'ABSENT',
-              date: new Date(date),
+              status:    update.status as 'PRESENT' | 'ABSENT',
+              date:      attendanceDate,
             },
           });
         }

@@ -3,6 +3,7 @@
 import api from "@/lib/api";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CameraModal } from "@/components/modals/camera-modal";
 import { PlusCircle, Trash2, UserSquare2 } from "lucide-react";
@@ -82,7 +83,7 @@ const StudentProfile = () => {
     const handleSaveProfile = async () => {
         const filledImages = images.filter(img => img !== null);
         if (filledImages.length < 3) {
-            alert("Please provide all 3 reference photos.");
+            toast.error("Please provide all 3 reference photos.");
             return;
         }
 
@@ -98,10 +99,10 @@ const StudentProfile = () => {
             await api.post('/profile/upload-faces', {
                 images: filledImages
             });
-            alert("Profile updated successfully!");
+            toast.success("Profile updated successfully!");
         } catch (error) {
             console.error(error);
-            alert("Failed to save profile.");
+            toast.error("Failed to save profile.");
         } finally {
             setIsSaving(false);
         }
