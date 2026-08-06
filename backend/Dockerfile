@@ -1,4 +1,4 @@
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 
 # Install dependencies only when needed
 FROM base AS deps
@@ -6,7 +6,7 @@ RUN apk add --no-cache libc6-compat
 WORKDIR /app
 COPY package.json package-lock.json* ./
 # We need to install all dependencies including devDependencies for Prisma generation and TypeScript compilation
-RUN npm ci
+RUN npm install
 
 # Rebuild the source code only when needed
 FROM base AS builder
@@ -28,7 +28,7 @@ ENV NODE_ENV=production
 
 # Copy package.json and package-lock.json to install only production dependencies
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
+RUN npm install --omit dev
 
 # Copy generated Prisma Client from builder
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma

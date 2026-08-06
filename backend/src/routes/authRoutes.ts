@@ -7,7 +7,7 @@ import { registerSchema, loginSchema, googleLoginSchema } from '../schemas/authS
 const router = Router();
 
 // Rate-limited + validated auth endpoints
-router.post('/register', validate(registerSchema), register);
+router.post('/register', authLimiter, validate(registerSchema), register);
 router.post('/login', authLimiter, loginSlowDown, validate(loginSchema), login);
 router.post('/google', authLimiter, validate(googleLoginSchema), googleLogin);
 
