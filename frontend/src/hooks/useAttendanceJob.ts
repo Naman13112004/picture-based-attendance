@@ -42,9 +42,14 @@ export function useAttendanceJob(): UseAttendanceJobReturn {
     useEffect(() => {
         if (!currentJobId) return;
 
-        const API_URL = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:5000/api";
+        // const API_URL = process.env.NEXT_PUBLIC_LOCAL_API_URL;
+        const API_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL;
+        if (!API_URL) {
+            console.error("NEXT_PUBLIC_BACKEND_API_URL is not defined");
+            return;
+        }
         const token = Cookies.get('token');
-        
+
         const url = new URL(`${API_URL}/attendance/job/${currentJobId}/stream`);
         if (token) {
             url.searchParams.append('token', token);
@@ -55,15 +60,15 @@ export function useAttendanceJob(): UseAttendanceJobReturn {
         eventSource.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                
+
                 if (data.status) {
                     setStatus(data.status);
                 }
-                
+
                 if (data.result) {
                     setResult(data.result);
                 }
-                
+
                 if (data.lastError) {
                     setError(data.lastError);
                 }
