@@ -70,8 +70,8 @@ export const markAttendance = async (req: AuthRequest, res: Response) => {
   try {
     const { classId, image, date } = req.body as {
       classId?: unknown;
-      image?:   unknown;
-      date?:    unknown;
+      image?: unknown;
+      date?: unknown;
     };
 
     // ── Validate payload ──────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ export const markAttendance = async (req: AuthRequest, res: Response) => {
     const existingJob = await db.attendanceJob.findFirst({
       where: {
         classId,
-        date:   dateStr,
+        date: dateStr,
         status: { notIn: ['FAILED', 'DEAD'] },
       },
       select: { id: true, status: true },
@@ -122,7 +122,7 @@ export const markAttendance = async (req: AuthRequest, res: Response) => {
           (existingJob.status === 'COMPLETED'
             ? 'Use "Manual Attendance" to make corrections.'
             : 'Check the existing job status.'),
-        jobId:  existingJob.id,
+        jobId: existingJob.id,
         status: existingJob.status,
       });
     }
@@ -150,18 +150,18 @@ export const markAttendance = async (req: AuthRequest, res: Response) => {
         classId,
         teacherId: req.user!.userId,
         imageUrl,
-        date:      dateStr,
-        status:    'QUEUED',
+        date: dateStr,
+        status: 'QUEUED',
       },
     });
 
     // ── Step 5: Enqueue into BullMQ ───────────────────────────────────────────
     try {
       await enqueueAttendanceJob({
-        jobDbId:   attendanceJob.id,
+        jobDbId: attendanceJob.id,
         classId,
         teacherId: req.user!.userId,
-        date:      dateStr,
+        date: dateStr,
       });
     } catch (queueErr) {
       // Queue failure: clean up the DB row so the teacher can retry immediately.
@@ -179,9 +179,9 @@ export const markAttendance = async (req: AuthRequest, res: Response) => {
     // ── Return 202 Accepted ───────────────────────────────────────────────────
     return res.status(202).json({
       message: 'Attendance processing has started. Track progress via the job stream.',
-      jobId:   attendanceJob.id,
-      status:  'QUEUED',
-      date:    dateStr,
+      jobId: attendanceJob.id,
+      status: 'QUEUED',
+      date: dateStr,
     });
 
   } catch (error) {
@@ -217,17 +217,17 @@ export const getJobStatus = async (req: AuthRequest, res: Response) => {
     const job = await db.attendanceJob.findUnique({
       where: { id: jobId },
       select: {
-        id:         true,
-        classId:    true,
-        teacherId:  true,
-        date:       true,
-        status:     true,
-        attempts:   true,
+        id: true,
+        classId: true,
+        teacherId: true,
+        date: true,
+        status: true,
+        attempts: true,
         maxAttempts: true,
-        lastError:  true,
-        result:     true,
-        createdAt:  true,
-        updatedAt:  true,
+        lastError: true,
+        result: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
 
@@ -302,15 +302,15 @@ export const streamJobStatus = async (req: AuthRequest, res: Response) => {
   }
 
   // ── SSE setup ─────────────────────────────────────────────────────────────
-  res.setHeader('Content-Type',     'text/event-stream');
-  res.setHeader('Cache-Control',    'no-cache');
-  res.setHeader('Connection',       'keep-alive');
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no'); // Disable Nginx/proxy buffering
   res.flushHeaders();
 
   const TERMINAL = new Set(['COMPLETED', 'FAILED', 'DEAD']);
-  const POLL_MS  = 2_000;  // poll every 2 s
-  const MAX_MS   = 60_000; // close after 60 s regardless
+  const POLL_MS = 2_000;  // poll every 2 s
+  const MAX_MS = 180_000; // close after 180 s regardless
 
   let closed = false;
 
@@ -324,14 +324,14 @@ export const streamJobStatus = async (req: AuthRequest, res: Response) => {
     }
   };
 
-  let pollTimer:    ReturnType<typeof setInterval>  | null = null;
-  let timeoutTimer: ReturnType<typeof setTimeout>   | null = null;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
   const teardown = () => {
     closed = true;
-    if (pollTimer)    clearInterval(pollTimer);
+    if (pollTimer) clearInterval(pollTimer);
     if (timeoutTimer) clearTimeout(timeoutTimer);
-    pollTimer    = null;
+    pollTimer = null;
     timeoutTimer = null;
   };
 
@@ -342,11 +342,11 @@ export const streamJobStatus = async (req: AuthRequest, res: Response) => {
 
   // ── Send initial status immediately ──────────────────────────────────────
   send({
-    type:      'status',
-    status:    initialJob.status,
-    attempts:  initialJob.attempts,
+    type: 'status',
+    status: initialJob.status,
+    attempts: initialJob.attempts,
     lastError: initialJob.lastError,
-    result:    initialJob.result,
+    result: initialJob.result,
   });
 
   // If already terminal, close immediately.
@@ -378,11 +378,11 @@ export const streamJobStatus = async (req: AuthRequest, res: Response) => {
     }
 
     send({
-      type:      'status',
-      status:    job.status,
-      attempts:  job.attempts,
+      type: 'status',
+      status: job.status,
+      attempts: job.attempts,
       lastError: job.lastError,
-      result:    job.result,
+      result: job.result,
     });
 
     if (TERMINAL.has(job.status)) {
@@ -395,7 +395,7 @@ export const streamJobStatus = async (req: AuthRequest, res: Response) => {
   timeoutTimer = setTimeout(() => {
     if (closed) return;
     send({
-      type:    'timeout',
+      type: 'timeout',
       message: 'Stream closed after 60 s. Poll GET /api/attendance/job/:jobId for the final status.',
     });
     teardown();
@@ -424,26 +424,26 @@ export const getStudentStats = async (req: AuthRequest, res: Response) => {
 
     const allRecords = await db.attendance.findMany({ where: { studentId } });
 
-    const totalSessions   = allRecords.length;
+    const totalSessions = allRecords.length;
     const presentSessions = allRecords.filter((r) => r.status === 'PRESENT').length;
 
     const attendancePercentage =
       totalSessions > 0 ? Math.round((presentSessions / totalSessions) * 100) : 0;
 
     const recentHistory = await db.attendance.findMany({
-      where:   { studentId },
+      where: { studentId },
       orderBy: { date: 'desc' },
-      take:    5,
+      take: 5,
       include: { classroom: { select: { name: true, code: true } } },
     });
 
     const formattedHistory = recentHistory.map((record) => ({
-      id:     record.id,
-      class:  record.classroom.name,
-      date:   new Date(record.date).toLocaleDateString('en-US', {
+      id: record.id,
+      class: record.classroom.name,
+      date: new Date(record.date).toLocaleDateString('en-US', {
         month: 'short',
-        day:   'numeric',
-        year:  'numeric',
+        day: 'numeric',
+        year: 'numeric',
       }),
       status: record.status === 'PRESENT' ? 'Present' : 'Absent',
     }));
@@ -469,7 +469,7 @@ export const getClassAttendanceHistory = async (
 ) => {
   try {
     const { classId } = req.params;
-    const { date }    = req.query;
+    const { date } = req.query;
 
     if (!date || typeof date !== 'string') {
       return res.status(400).json({ error: 'date query param is required (YYYY-MM-DD).' });
@@ -482,10 +482,10 @@ export const getClassAttendanceHistory = async (
     }
 
     const startOfDay = toUtcMidnight(date);
-    const endOfDay   = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000 - 1);
+    const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000 - 1);
 
     const classroom = await db.classroom.findUnique({
-      where:   { id: classId },
+      where: { id: classId },
       include: {
         students: {
           include: {
@@ -503,7 +503,7 @@ export const getClassAttendanceHistory = async (
     }
 
     const attendanceRecords = await db.attendance.findMany({
-      where:   { classId, date: { gte: startOfDay, lte: endOfDay } },
+      where: { classId, date: { gte: startOfDay, lte: endOfDay } },
       orderBy: { date: 'desc' },
     });
 
@@ -518,21 +518,21 @@ export const getClassAttendanceHistory = async (
       const record = latestByStudent.get(profile.user.id);
       return {
         studentId: profile.user.id,
-        name:      profile.user.name,
-        email:     profile.user.email,
-        avatar:    profile.user.avatar,
-        status:    record ? record.status : 'ABSENT',
-        time:      record ? record.date   : null,
+        name: profile.user.name,
+        email: profile.user.email,
+        avatar: profile.user.avatar,
+        status: record ? record.status : 'ABSENT',
+        time: record ? record.date : null,
       };
     });
 
     const presentCount = history.filter((h) => h.status === 'PRESENT').length;
 
     return res.json({
-      date:          startOfDay,
+      date: startOfDay,
       totalStudents: classroom.students.length,
       presentCount,
-      records:       history,
+      records: history,
     });
 
   } catch (error) {
@@ -555,13 +555,13 @@ export const updateManualAttendance = async (
   try {
     const { classId, date, updates } = req.body as {
       classId?: unknown;
-      date?:    unknown;
+      date?: unknown;
       updates?: unknown;
     };
 
     if (
       typeof classId !== 'string' ||
-      typeof date    !== 'string' ||
+      typeof date !== 'string' ||
       !Array.isArray(updates)
     ) {
       return res.status(400).json({ error: 'Invalid request data.' });
@@ -580,7 +580,7 @@ export const updateManualAttendance = async (
     }
 
     const attendanceDate = toUtcMidnight(date);
-    const dayEnd         = new Date(attendanceDate.getTime() + 24 * 60 * 60 * 1000 - 1);
+    const dayEnd = new Date(attendanceDate.getTime() + 24 * 60 * 60 * 1000 - 1);
 
     const VALID_STATUSES = new Set(['PRESENT', 'ABSENT']);
 
@@ -600,15 +600,15 @@ export const updateManualAttendance = async (
         if (existing) {
           await tx.attendance.update({
             where: { id: existing.id },
-            data:  { status: update.status as 'PRESENT' | 'ABSENT' },
+            data: { status: update.status as 'PRESENT' | 'ABSENT' },
           });
         } else {
           await tx.attendance.create({
             data: {
               studentId: update.studentId,
               classId,
-              status:    update.status as 'PRESENT' | 'ABSENT',
-              date:      attendanceDate,
+              status: update.status as 'PRESENT' | 'ABSENT',
+              date: attendanceDate,
             },
           });
         }
