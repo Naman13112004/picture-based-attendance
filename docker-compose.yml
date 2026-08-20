@@ -1,23 +1,4 @@
 services:
-  # ---------------------------------------------------------------------------
-  # Local PostgreSQL (used only for local development without Neon)
-  # ---------------------------------------------------------------------------
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-snapattend}
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # ---------------------------------------------------------------------------
   # Node.js API server
@@ -29,7 +10,7 @@ services:
     image: snapattend-backend:latest
     environment:
       - PORT=5000
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-snapattend}
+      - DATABASE_URL=${DATABASE_URL}
       - JWT_SECRET=${JWT_SECRET}
       - PYTHON_API_BASE_URL=http://ai-service:8000
       - SUPABASE_URL=${SUPABASE_URL}
@@ -40,11 +21,19 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       # Upstash Redis URL — set this to your Upstash rediss:// connection string
       - REDIS_URL=${REDIS_URL}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000}
+      - BULL_BOARD_USERNAME=${BULL_BOARD_USERNAME}
+      - BULL_BOARD_PASSWORD=${BULL_BOARD_PASSWORD}
     ports:
       - "5000:5000"
     depends_on:
-      postgres:
-        condition: service_healthy
+      ai-service:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
@@ -60,7 +49,7 @@ services:
     # Override the default CMD to run the worker entry point instead of the API.
     command: ["node", "dist/worker/index.js"]
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-snapattend}
+      - DATABASE_URL=${DATABASE_URL}
       - PYTHON_API_BASE_URL=http://ai-service:8000
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
@@ -74,8 +63,6 @@ services:
       # pgvector cosine distance threshold (0=identical, 2=opposite; default 0.5)
       - PGVECTOR_SIMILARITY_THRESHOLD=${PGVECTOR_SIMILARITY_THRESHOLD:-0.5}
     depends_on:
-      postgres:
-        condition: service_healthy
       ai-service:
         condition: service_healthy   # Wait for /ready probe, not just process start
     restart: unless-stopped
@@ -87,6 +74,10 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_BACKEND_API_URL: ${NEXT_PUBLIC_BACKEND_API_URL:-http://localhost:5000/api}
+        NEXT_PUBLIC_LOCAL_API_URL: ${NEXT_PUBLIC_LOCAL_API_URL:-http://localhost:5000/api}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID}
     image: snapattend-frontend:latest
     environment:
       - NEXT_PUBLIC_BACKEND_API_URL=${NEXT_PUBLIC_BACKEND_API_URL:-http://localhost:5000/api}
@@ -95,7 +86,8 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
@@ -114,12 +106,12 @@ services:
     healthcheck:
       # Use /ready (Phase 6) — returns 503 until YuNet+SFace models are loaded.
       # This prevents the worker from sending jobs before inference is available.
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/ready || exit 1"]
+      # NOTE: python:3.10-slim does not include curl, so we use Python's urllib.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')\" || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 6
       start_period: 60s   # Allow time for model download on first run
 
 volumes:
-  pgdata:
   ai-models:

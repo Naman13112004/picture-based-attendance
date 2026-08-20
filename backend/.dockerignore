@@ -4,6 +4,7 @@ Dockerfile
 .dockerignore
 dist
 build
+.env
 .env*.local
 *.pem
 .DS_Store
